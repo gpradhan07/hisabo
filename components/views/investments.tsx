@@ -12,10 +12,10 @@ import { SERIES_COLORS, slotColor } from "@/components/use-period-data";
 import { MAX_SERIES, byCategory, categorySlots, monthlyStacks } from "@/lib/analytics";
 import { addDays, addMonths, startOfMonth } from "@/lib/dates";
 import { fmtMonth, fmtMonthShort, fmtShortDate, type Formatters } from "@/lib/format";
-import { asSeries, investmentIcon, investmentPlans, monthlyCommitment, type Plan } from "@/lib/investments";
+import { asSeries, investmentIcon, investmentPlans, investmentTitle, monthlyCommitment, type Plan } from "@/lib/investments";
+import { per } from "@/lib/recurring";
 import type { Investment } from "@/lib/types";
 
-const PER = { 1: "month", 3: "quarter", 6: "half-year", 12: "year" } as Record<number, string>;
 const SUBTITLE = "Everything you've put away, as of today";
 
 export function InvestmentsView() {
@@ -164,7 +164,7 @@ function Plans({ plans, fmt, className }: { plans: Plan[]; fmt: Formatters; clas
                   )}
                 </div>
                 <p className="mt-0.5 text-[13px] text-ink-2">
-                  <span className="font-semibold text-ink">{fmt.money(p.amount)}</span> per {PER[p.step] ?? "instalment"}
+                  <span className="font-semibold text-ink">{fmt.money(p.amount)}</span> per {per(p.interval)}
                   {p.name !== p.type && <> · {p.type}</>}
                 </p>
               </div>
@@ -183,10 +183,10 @@ function Plans({ plans, fmt, className }: { plans: Plan[]; fmt: Formatters; clas
                   <dt className="text-ink-3">Since</dt>
                   <dd className="font-medium text-ink">{fmtMonth(p.first)}</dd>
                 </div>
-                {p.paymentMethod && (
+                {(p.platform || p.paymentMethod) && (
                   <div>
-                    <dt className="text-ink-3">Paid with</dt>
-                    <dd className="truncate font-medium text-ink">{p.paymentMethod}</dd>
+                    <dt className="text-ink-3">{p.platform ? "Platform" : "Paid with"}</dt>
+                    <dd className="truncate font-medium text-ink">{p.platform || p.paymentMethod}</dd>
                   </div>
                 )}
               </dl>
@@ -213,8 +213,10 @@ function Recent({ list, className }: { list: Investment[]; className?: string })
               <span className="text-[16px] font-semibold text-ink">{i.date.getDate()}</span>
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[14px] font-medium text-ink">{i.remark || i.type}</p>
-              <p className="truncate text-[12px] text-ink-2">{[i.remark ? i.type : null, i.frequency, i.paymentMethod || null].filter(Boolean).join(" · ")}</p>
+              <p className="truncate text-[14px] font-medium text-ink">{investmentTitle(i)}</p>
+              <p className="truncate text-[12px] text-ink-2">
+                {[investmentTitle(i) !== i.type ? i.type : null, i.frequency, i.platform || null, i.paymentMethod || null, i.cardName || null].filter(Boolean).join(" · ")}
+              </p>
             </div>
             <span className="shrink-0 text-[14px] font-semibold tabular-nums text-ink">{fmt.moneyExact(i.amount)}</span>
           </li>

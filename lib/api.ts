@@ -1,4 +1,5 @@
-import type { ApiResponse, Dataset, Emi, Expense, Investment } from "./types";
+import { subscriptionExpenses } from "./subscriptions";
+import type { ApiResponse, Dataset, Emi, EmiPayment, Expense, Investment, Subscription } from "./types";
 
 export function toDataset(json: ApiResponse): Dataset {
   const expenses: Expense[] = [];
@@ -6,14 +7,39 @@ export function toDataset(json: ApiResponse): Dataset {
     const date = parseDate(r.date);
     const amount = toNumber(r.amount);
     if (!date || !Number.isFinite(amount) || amount === 0) continue;
+    const merchant = (r.merchant ?? "").trim();
     expenses.push({
       id: `e${r.row}`,
       date,
       amount,
       category: tidyCategory(r.category),
       remark: r.remark ?? "",
+      ...(merchant ? { merchant } : {}),
     });
   }
+
+  const subscriptions: Subscription[] = [];
+  for (const r of json.subscriptions ?? []) {
+    const date = parseDate(r.date);
+    const amount = toNumber(r.amount);
+    const name = (r.name ?? "").trim();
+    if (!date || !name || !Number.isFinite(amount) || amount <= 0) continue;
+    const frequency = tidyFrequency(r.frequency);
+    subscriptions.push({
+      id: `s${r.row}`,
+      date,
+      amount,
+      name,
+      frequency,
+      autoRenew: frequency !== "One-time" && !/^(n|no|false|0)$/i.test((r.autoRenew ?? "").trim()),
+      paymentMethod: (r.paymentMethod ?? "").trim(),
+      cardName: (r.cardName ?? "").trim(),
+      remark: (r.remark ?? "").trim(),
+    });
+  }
+  subscriptions.sort((a, b) => b.date.getTime() - a.date.getTime());
+  // Subscriptions count as spending too.
+  expenses.push(...subscriptionExpenses(subscriptions));
   expenses.sort((a, b) => b.date.getTime() - a.date.getTime());
 
   const emis: Emi[] = [];
@@ -30,8 +56,29 @@ export function toDataset(json: ApiResponse): Dataset {
       total: Number.isFinite(total) && total > 0 ? total : monthly * tenure,
       startDate: parseDate(r.startDate, true),
       addedOn: parseDate(r.addedOn),
+      type: (r.emiType ?? "").trim(),
+      paidBefore: Math.max(0, Math.round(toNumber(r.paidBefore ?? "")) || 0),
+      remark: (r.remark ?? "").trim(),
     });
   }
+
+  const emiPayments: EmiPayment[] = [];
+  for (const r of json.emiPayments ?? []) {
+    const date = parseDate(r.date);
+    const amount = toNumber(r.amount);
+    const emiName = (r.emiName ?? "").trim();
+    if (!date || !emiName || !Number.isFinite(amount) || amount <= 0) continue;
+    emiPayments.push({
+      id: `p${r.row}`,
+      date,
+      emiName,
+      amount,
+      paymentMethod: (r.paymentMethod ?? "").trim(),
+      cardName: (r.cardName ?? "").trim(),
+      remark: (r.remark ?? "").trim(),
+    });
+  }
+  emiPayments.sort((a, b) => b.date.getTime() - a.date.getTime());
 
   const investments: Investment[] = [];
   for (const r of json.investments ?? []) {
@@ -46,22 +93,28 @@ export function toDataset(json: ApiResponse): Dataset {
       frequency: tidyFrequency(r.frequency),
       paymentMethod: (r.paymentMethod ?? "").trim(),
       remark: (r.remark ?? "").trim(),
+      name: (r.investmentName ?? "").trim(),
+      platform: (r.platform ?? "").trim(),
+      cardName: (r.cardName ?? "").trim(),
     });
   }
   investments.sort((a, b) => b.date.getTime() - a.date.getTime());
 
   return {
     expenses,
+    subscriptions,
     emis,
+    emiPayments,
     investments,
     syncedAt: json.generatedAt ? new Date(json.generatedAt) : new Date(),
   };
 }
 
-/** "monthly", "SIP", "one time", "annual"… → One-time / Monthly / Quarterly / Half-yearly / Yearly */
+/** "monthly", "SIP", "one time", "annual"… → One-time / Weekly / Monthly / Quarterly / Half-yearly / Yearly */
 export function tidyFrequency(f: string | undefined): string {
   const s = (f ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
   if (!s || s === "onetime" || s === "once" || s === "lumpsum") return "One-time";
+  if (s === "weekly" || s === "week") return "Weekly";
   if (s === "monthly" || s === "sip" || s === "month") return "Monthly";
   if (s === "quarterly" || s === "quarter") return "Quarterly";
   if (s === "halfyearly" || s === "semiannual" || s === "semiannually" || s === "sixmonthly") return "Half-yearly";
@@ -119,3 +172,6 @@ export function parseDate(v: string | null | undefined, dateOnly = false): Date 
   if (isNaN(d.getTime())) return null;
   return dateOnly ? new Date(d.getFullYear(), d.getMonth(), d.getDate()) : d;
 }
+
+/** What to call an expense in lists: where it was spent, else its note, else its category. */
+export const expenseTitle = (e: Expense) => e.merchant || e.remark || e.category;

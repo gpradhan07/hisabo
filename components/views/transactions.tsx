@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { usePeriodData } from "@/components/use-period-data";
 import { addDays, isSameDay, startOfDay } from "@/lib/dates";
+import { expenseTitle } from "@/lib/api";
 import { fmtDate, fmtDay, fmtTime } from "@/lib/format";
 import type { Expense } from "@/lib/types";
 
@@ -46,7 +47,11 @@ export function TransactionsView() {
     const list = pd.items.filter(
       (e) =>
         (!category || e.category === category) &&
-        (!q || e.remark.toLowerCase().includes(q) || e.category.toLowerCase().includes(q) || String(e.amount).includes(q)),
+        (!q ||
+          e.remark.toLowerCase().includes(q) ||
+          (e.merchant ?? "").toLowerCase().includes(q) ||
+          e.category.toLowerCase().includes(q) ||
+          String(e.amount).includes(q)),
     );
     const by: Record<Sort, (a: Expense, b: Expense) => number> = {
       newest: (a, b) => b.date.getTime() - a.date.getTime(),
@@ -81,8 +86,8 @@ export function TransactionsView() {
   const exportCsv = () => {
     const esc = (s: string) => `"${s.replace(/"/g, '""')}"`;
     const csv = [
-      "Date,Time,Category,Remark,Amount",
-      ...rows.map((e) => [esc(fmtDate(e.date)), esc(fmtTime(e.date)), esc(e.category), esc(e.remark), e.amount].join(",")),
+      "Date,Time,Category,Merchant,Remark,Amount",
+      ...rows.map((e) => [esc(fmtDate(e.date)), esc(fmtTime(e.date)), esc(e.category), esc(e.merchant ?? ""), esc(e.remark), e.amount].join(",")),
     ].join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = Object.assign(document.createElement("a"), { href: url, download: `expenses-${range.id}.csv` });
@@ -98,7 +103,7 @@ export function TransactionsView() {
         <StatTile label="Entries" value={rows.length.toLocaleString()} />
         <StatTile label="Total" value={fmt.money(total)} />
         <StatTile label="Average" value={rows.length ? fmt.money(total / rows.length) : "—"} />
-        <StatTile label="Largest" value={largest ? fmt.money(largest.amount) : "—"} sub={largest ? largest.remark || largest.category : undefined} />
+        <StatTile label="Largest" value={largest ? fmt.money(largest.amount) : "—"} sub={largest ? expenseTitle(largest) : undefined} />
       </StatGrid>
 
       <Card>
@@ -183,7 +188,10 @@ export function TransactionsView() {
                       <TableCell className="py-2.5">
                         <div className="flex items-center gap-3">
                           <CategoryAvatar category={e.category} slots={pd.slots} size={34} />
-                          <span className="truncate text-[14px] font-medium">{e.remark || e.category}</span>
+                          <span className="min-w-0 truncate text-[14px] font-medium">
+                            {expenseTitle(e)}
+                            {e.merchant && e.remark && <span className="font-normal text-muted-foreground"> · {e.remark}</span>}
+                          </span>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -216,9 +224,11 @@ export function TransactionsView() {
                     <div className={cx("-mx-2 flex items-center gap-3 rounded-lg px-2 py-2.5", freshIds.has(e.id) && "animate-flash")}>
                       <CategoryAvatar category={e.category} slots={pd.slots} />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-[14px] font-medium">{e.remark || e.category}</p>
+                        <p className="truncate text-[14px] font-medium">{expenseTitle(e)}</p>
                         <p className="truncate text-[12px] text-muted-foreground">
-                          {e.category} · {byDate ? fmtTime(e.date) : `${dayName(e.date)}, ${fmtTime(e.date)}`}
+                          {[e.category, e.merchant && e.remark ? e.remark : null, byDate ? fmtTime(e.date) : `${dayName(e.date)}, ${fmtTime(e.date)}`]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </p>
                       </div>
                       <span className="shrink-0 text-[14px] font-semibold tabular-nums">{fmt.moneyExact(e.amount)}</span>

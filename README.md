@@ -84,28 +84,31 @@ The dashboard sits behind a username and password. Anyone who isn't signed in is
 
 - **Overview:** a personal greeting, total spent with a running-total chart against the previous period, a budget ring, KPI cards with trends, a category donut, auto-generated insights, recent expenses and upcoming EMIs.
 - **Analytics:** each category's change against the previous period, top places, spending by weekday and time of day, 12 months by category, and a calendar heatmap of every day.
-- **Transactions:** search, filter by category, sort and export to CSV. It shows a table on desktop and a list grouped by day on phones.
-- **Investments:** total invested, this month against the same days last month, your monthly commitment, money invested per month by type, allocation, and a card for each recurring plan (SIPs and the like) with its next expected date.
-- **EMIs:** monthly outflow, amount left, the date you'll be EMI-free, a 12-month outlook and a card for each EMI.
+- **Transactions:** search by place, note or category, filter by category, sort and export to CSV. It shows a table on desktop and a list grouped by day on phones.
+- **Subscriptions:** what your subscriptions cost per month and per year, the next renewal date of each (worked out from the billing frequency), ones with auto-renew off, one-time payments, and every payment. Subscription payments also count in your spending, under the Subscriptions category.
+- **Investments:** total invested, this month against the same days last month, your monthly commitment, money invested per month by type, allocation, and a card for each recurring plan (SIPs and the like) with its platform and next expected date.
+- **EMIs:** monthly outflow, amount left, the date you'll be EMI-free, a 12-month outlook, a card for each EMI and your recorded payments. When you record payments (or enter instalments already paid), hisabo counts those; otherwise it assumes one instalment a month from the start date.
 - **Profile:** your name, plus optional email, monthly income (shows "% of income spent"), monthly budget (drives the budget ring) and payday (a "Payday in N days" countdown). It's saved in your sheet, so it's the same on every device.
 
 The dashboard opens in a dark green theme, and a toggle switches it to light mode.
 
 ### What the Shortcut sends
 
-The Shortcut posts a small JSON body to your web app link:
+The Shortcut asks for the amount, then what it is (Expense, Subscription, Investment or EMI), then only the questions that type needs. It posts a small JSON body to your web app link:
 
 ```json
-{ "Amount": 250, "Category": "Food", "Remark": "Lunch", "PaymentMethod": "UPI", "CardName": "" }
+{ "Type": "Expense", "Amount": 250, "Category": "Food & Dining", "Date": "2026-10-31T13:05:00+05:30", "PaymentMethod": "UPI (Credit Card)", "CardName": "Kotak CC", "Remark": "Lunch" }
 ```
 
 | Entry | Fields |
 |---|---|
-| Expense (default) | `Amount`, `Category`, optional `Remark`, `PaymentMethod`, `CardName` |
-| Investment | `Type: "Investment"`, `Amount`, `InvestmentType` (e.g. Mutual Fund, PPF), `Frequency` (`One-Time`, `Monthly`, `Quarterly` or `Yearly`), optional `PaymentMethod`, `Remark` |
-| EMI | `Type: "EMI"`, `Amount` (monthly), `Tenure` (months), `EMIName`, `StartDate`, optional `PaymentMethod`, `CardName` |
+| Expense (default) | `Amount`, `Category`, optional `Merchant`, `Date`, `PaymentMethod`, `CardName`, `Remark` |
+| Subscription | `Type: "Subscription"`, `Amount`, `Name`, `Frequency` (`Weekly`, `Monthly`, `Quarterly`, `Yearly` or `One-time`), `AutoRenew` (`Yes`/`No`), optional `Date`, `PaymentMethod`, `CardName`, `Remark` |
+| Investment | `Type: "Investment"`, `Amount`, `InvestmentType` (e.g. Mutual Fund, PPF), optional `InvestmentName`, `Frequency` (`One-Time`, `Weekly`, `Monthly`, `Quarterly` or `Yearly`), `Platform`, `Date`, `PaymentMethod`, `CardName`, `Remark` |
+| New EMI | `Type: "EMI"`, `Amount` (monthly), `Tenure` (months), `EMIName`, `StartDate`, optional `EMIType`, `PaidBefore` (instalments already paid), `PaymentMethod`, `CardName`, `Remark` |
+| EMI payment | `Type: "EMIPayment"`, `Amount`, `EMIName` (an EMI you've already added), optional `Date`, `PaymentMethod`, `CardName`, `Remark` |
 
-Recurring investments with the same type and remark are grouped into one plan. EMI start dates can be a real date or text such as `05/03/2026` or `5 Mar 2026`. Text dates are read day first.
+Without a `Date`, an entry is saved at the current time; dates in the future are refused. Recurring investments with the same type and name are grouped into one plan. EMI start dates can be a real date or text such as `05/03/2026` or `5 Mar 2026`. Text dates are read day first. Your sheet gets **Subscriptions** and **EMI Payments** tabs, and new columns at the end of the others, the first time they're needed.
 
 ---
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart3, ChevronRight, LayoutDashboard, Landmark, Moon, Plus, ReceiptText, RefreshCw, Sun, TrendingUp } from "lucide-react";
+import { BarChart3, ChevronRight, Landmark, LayoutDashboard, Moon, Plus, ReceiptText, RefreshCw, Repeat, Sun, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useId, useTransition, type CSSProperties, type ReactNode } from "react";
@@ -41,6 +41,7 @@ const NAV = [
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/transactions", label: "Transactions", short: "Expenses", icon: ReceiptText },
   { href: "/investments", label: "Investments", short: "Invest", icon: TrendingUp },
+  { href: "/subscriptions", label: "Subscriptions", short: "Subs", icon: Repeat },
   { href: "/emis", label: "EMIs", icon: Landmark },
 ];
 
@@ -402,7 +403,7 @@ function MobileTabBar() {
   const active = useActive();
   return (
     <nav aria-label="Main" className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t bg-card/90 backdrop-blur-xl md:hidden">
-      <div className="grid grid-cols-5">
+      <div className="grid grid-cols-6">
         {NAV.map(({ href, label, short, icon: Icon }) => (
           <Link
             key={href}

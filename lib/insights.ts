@@ -1,8 +1,9 @@
 import { compareCategories, emiProgress, sum, topRemarks, weekdayAverages } from "./analytics";
+import { expenseTitle } from "./api";
 import { addMonths, daysBetween, startOfDay } from "./dates";
 import { fmtShortDate, type Formatters } from "./format";
 import type { Range } from "./periods";
-import type { Emi, Expense } from "./types";
+import type { Emi, EmiPayment, Expense } from "./types";
 
 export type Tone = "good" | "bad" | "neutral";
 export type InsightKind = "up" | "down" | "weekend" | "biggest" | "budget" | "streak" | "habit" | "emi";
@@ -22,6 +23,7 @@ export function buildInsights({
   current,
   previous,
   emis,
+  emiPayments = [],
   budget,
   fmt,
   now,
@@ -30,6 +32,7 @@ export function buildInsights({
   current: Expense[];
   previous: Expense[];
   emis: Emi[];
+  emiPayments?: EmiPayment[];
   budget: number | null;
   fmt: Formatters;
   now: Date;
@@ -120,7 +123,7 @@ export function buildInsights({
       kind: "biggest",
       tone: "neutral",
       title: `Biggest: ${fmt.money(biggest.amount)}`,
-      body: `${biggest.remark || biggest.category} on ${fmtShortDate(biggest.date)}, ${Math.round((biggest.amount / total) * 100)}% of the period.`,
+      body: `${expenseTitle(biggest)} on ${fmtShortDate(biggest.date)}, ${Math.round((biggest.amount / total) * 100)}% of the period.`,
       weight: 40,
     });
 
@@ -149,7 +152,7 @@ export function buildInsights({
 
   // EMI ending soon
   const ending = emis
-    .map((e) => emiProgress(e, now))
+    .map((e) => emiProgress(e, now, emiPayments))
     .filter((p) => p.status === "active" && p.remainingMonths <= 3)
     .sort((a, b) => a.remainingMonths - b.remainingMonths)[0];
   if (ending?.endDate) {

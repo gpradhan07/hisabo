@@ -30,6 +30,7 @@ import { PageHeader } from "@/components/page-header";
 import { SERIES_COLORS, slotColor, usePeriodData } from "@/components/use-period-data";
 import { Amount, Badge, Card, Delta, EmptyState, Segmented, Skeleton, StatGrid, StatTile, ToneIcon, TrendBadge, cx } from "@/components/kit";
 import { MAX_SERIES, cumulativeByDay, emiDueInRange, emiProgress, inRange, sum } from "@/lib/analytics";
+import { expenseTitle } from "@/lib/api";
 import { addDays, addMonths, daysBetween, isSameDay, startOfDay, startOfMonth } from "@/lib/dates";
 import { fmtDay, fmtMonthShort, fmtShortDate, fmtTime } from "@/lib/format";
 import { daysToPayday, firstName, greeting } from "@/lib/profile";
@@ -292,7 +293,7 @@ function Kpis() {
   const past = pd.buckets.filter((b) => !b.future);
   const spark = past.slice(-14);
   const emiDue = emiDueInRange(data!.emis, range.start, range.end);
-  const activeEmis = data!.emis.filter((e) => emiProgress(e, range.dataEnd).status === "active").length;
+  const activeEmis = data!.emis.filter((e) => emiProgress(e, range.dataEnd, data!.emiPayments).status === "active").length;
   const top = pd.categories[0];
   const dailyAvg = pd.total / range.elapsedDays;
   const prevDays = range.prev ? Math.max(1, daysBetween(range.prev.start, range.prev.end)) : 0;
@@ -460,7 +461,7 @@ function Insights({ className }: { className?: string }) {
   const { data, range, fmt, budget, now } = useDashboard();
   const pd = usePeriodData()!;
   const list = useMemo(
-    () => buildInsights({ range, current: pd.items, previous: pd.previous, emis: data!.emis, budget, fmt, now }).slice(0, 4),
+    () => buildInsights({ range, current: pd.items, previous: pd.previous, emis: data!.emis, emiPayments: data!.emiPayments, budget, fmt, now }).slice(0, 4),
     [range, pd, data, budget, fmt, now],
   );
 
@@ -518,7 +519,7 @@ function Recent({ className }: { className?: string }) {
               <li key={e.id} className={cx("flex items-center gap-3 rounded-lg px-2 py-2", freshIds.has(e.id) && "animate-flash")}>
                 <CategoryAvatar category={e.category} slots={pd.slots} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[14px] font-medium text-ink">{e.remark || e.category}</p>
+                  <p className="truncate text-[14px] font-medium text-ink">{expenseTitle(e)}</p>
                   <p className="truncate text-[12px] text-ink-2">
                     {e.category} · {when}
                   </p>
@@ -538,7 +539,7 @@ function Recent({ className }: { className?: string }) {
 function UpcomingEmis({ className }: { className?: string }) {
   const { data, fmt, now } = useDashboard();
   const upcoming = data!.emis
-    .map((e) => emiProgress(e, now))
+    .map((e) => emiProgress(e, now, data!.emiPayments))
     .filter((p) => p.nextDue)
     .sort((a, b) => a.nextDue!.getTime() - b.nextDue!.getTime())
     .slice(0, 4);

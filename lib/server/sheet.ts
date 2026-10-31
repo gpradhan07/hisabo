@@ -11,7 +11,9 @@ export type SheetResult =
       version: string;
       generatedAt: string;
       expenses: ApiResponse["expenses"];
+      subscriptions: ApiResponse["subscriptions"];
       emis: ApiResponse["emis"];
+      emiPayments: ApiResponse["emiPayments"];
       investments: ApiResponse["investments"];
       profile: Profile | null;
     }
@@ -22,7 +24,9 @@ export async function loadSheet(): Promise<SheetResult> {
   const { url, key } = sheetConfig();
 
   // No sheet configured yet → the client renders built-in demo data.
-  if (!url) return { ok: true, demo: true, version: "demo", generatedAt: new Date().toISOString(), expenses: [], emis: [], investments: [], profile: null };
+  if (!url) {
+    return { ok: true, demo: true, version: "demo", generatedAt: new Date().toISOString(), expenses: [], subscriptions: [], emis: [], emiPayments: [], investments: [], profile: null };
+  }
   if (!key) return { ok: false, status: 500, error: "DASHBOARD_KEY is missing from your environment." };
 
   let target: URL;
@@ -59,9 +63,11 @@ export async function loadSheet(): Promise<SheetResult> {
   }
 
   const expenses = json.expenses ?? [];
+  const subscriptions = json.subscriptions ?? [];
   const emis = json.emis ?? [];
+  const emiPayments = json.emiPayments ?? [];
   const investments = json.investments ?? [];
   const profile = normalizeProfile(json.profile);
-  const version = createHash("sha1").update(JSON.stringify([expenses, emis, investments, profile])).digest("base64url").slice(0, 16);
-  return { ok: true, demo: false, version, generatedAt: json.generatedAt ?? new Date().toISOString(), expenses, emis, investments, profile };
+  const version = createHash("sha1").update(JSON.stringify([expenses, subscriptions, emis, emiPayments, investments, profile])).digest("base64url").slice(0, 16);
+  return { ok: true, demo: false, version, generatedAt: json.generatedAt ?? new Date().toISOString(), expenses, subscriptions, emis, emiPayments, investments, profile };
 }

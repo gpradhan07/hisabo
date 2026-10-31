@@ -1,7 +1,7 @@
 import { addDays, addMonths, daysBetween, startOfDay, startOfMonth, startOfWeek } from "./dates";
 import { fmtDay, fmtMonth, fmtMonthShort, fmtShortDate } from "./format";
 import type { Range } from "./periods";
-import type { Emi, Expense } from "./types";
+import type { Emi, EmiPayment, Expense } from "./types";
 
 export const inRange = (list: Expense[], start: Date, end: Date) => list.filter((e) => e.date >= start && e.date < end);
 
@@ -103,35 +103,46 @@ export interface EmiProgress {
   remainingAmount: number;
   nextDue: Date | null;
   endDate: Date | null;
+  /** counted from recorded payments (+ instalments paid before), rather than assumed from the calendar */
+  tracked: boolean;
+  /** payments recorded in the "EMI Payments" tab */
+  recorded: number;
+  /** tracked and the next instalment's due date has passed without a recorded payment */
+  overdue: boolean;
 }
 
-/** An instalment counts as paid once its due date (start date + n months) has arrived. */
-export function emiProgress(emi: Emi, now: Date): EmiProgress {
+const sameEmi = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * How far along an EMI is. When payments are recorded (or instalments paid before were entered), those are
+ * counted. Otherwise an instalment counts as paid once its due date (start date + n months) has arrived.
+ */
+export function emiProgress(emi: Emi, now: Date, payments: EmiPayment[] = []): EmiProgress {
   const today = startOfDay(now);
-  if (!emi.startDate) {
-    return {
-      emi,
-      status: "unknown",
-      paidMonths: 0,
-      remainingMonths: emi.tenure,
-      paidAmount: 0,
-      remainingAmount: emi.total,
-      nextDue: null,
-      endDate: null,
-    };
-  }
+  const mine = payments.filter((p) => sameEmi(p.emiName, emi.name));
+  const tracked = emi.paidBefore > 0 || mine.length > 0;
+
   let paid = 0;
-  while (paid < emi.tenure && addMonths(emi.startDate, paid) <= today) paid++;
+  if (tracked) paid = Math.min(emi.tenure, emi.paidBefore + mine.length);
+  else if (emi.startDate) while (paid < emi.tenure && addMonths(emi.startDate, paid) <= today) paid++;
+
+  const paidAmount = tracked ? emi.paidBefore * emi.monthly + mine.reduce((s, p) => s + p.amount, 0) : paid * emi.monthly;
+  const nextDue = emi.startDate && paid < emi.tenure ? addMonths(emi.startDate, paid) : null;
+  const status: EmiStatus =
+    paid >= emi.tenure ? "completed" : !emi.startDate && !tracked ? "unknown" : paid === 0 && (!emi.startDate || emi.startDate > today) ? "upcoming" : "active";
 
   return {
     emi,
-    status: paid === 0 ? "upcoming" : paid >= emi.tenure ? "completed" : "active",
+    status,
     paidMonths: paid,
     remainingMonths: emi.tenure - paid,
-    paidAmount: paid * emi.monthly,
-    remainingAmount: (emi.tenure - paid) * emi.monthly,
-    nextDue: paid < emi.tenure ? addMonths(emi.startDate, paid) : null,
-    endDate: addMonths(emi.startDate, emi.tenure - 1),
+    paidAmount,
+    remainingAmount: Math.max(0, (emi.tenure - paid) * emi.monthly),
+    nextDue,
+    endDate: emi.startDate ? addMonths(emi.startDate, emi.tenure - 1) : null,
+    tracked,
+    recorded: mine.length,
+    overdue: tracked && !!nextDue && nextDue < today,
   };
 }
 
@@ -193,10 +204,11 @@ export function hourlyTotals(list: Expense[]) {
 }
 
 /** Most frequent places/remarks by money spent. */
+/** Where the money goes most: by merchant when one was entered ("Swiggy"), else by note. */
 export function topRemarks(list: Expense[], n = 6) {
   const map = new Map<string, { name: string; total: number; count: number; category: string }>();
   for (const e of list) {
-    const name = e.remark.trim();
+    const name = (e.merchant || e.remark).trim();
     if (!name) continue;
     const key = name.toLowerCase();
     const r = map.get(key) ?? { name, total: 0, count: 0, category: e.category };

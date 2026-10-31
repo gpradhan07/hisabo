@@ -97,6 +97,16 @@ const store = {
 };
 
 const expenseKey = (e: Expense) => `${e.date.getTime()}|${e.amount}|${e.category}|${e.remark}`;
+/** The sheet's rows from an /api/data reply (or its cached copy), for toDataset. */
+const sheetRows = (json: Extract<DataPayload, { ok: true }>) => ({
+  expenses: json.expenses,
+  subscriptions: json.subscriptions,
+  emis: json.emis,
+  emiPayments: json.emiPayments,
+  investments: json.investments,
+  generatedAt: json.generatedAt,
+});
+
 const manualSig = (amount: number, category: string, remark: string) => `${amount}|${category.trim().toLowerCase()}|${remark.trim()}`;
 
 export function DataProvider({ children }: { children: ReactNode }) {
@@ -159,7 +169,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           });
           for (const e of fromShortcut.slice(0, 3)) {
             toast.success(`New expense · ${fmt.moneyExact(e.amount)}`, {
-              description: [e.category, e.remark].filter(Boolean).join(" — "),
+              description: [e.category, e.merchant, e.remark].filter(Boolean).join(" · "),
             });
           }
         }
@@ -198,7 +208,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
             store.set(CACHE_KEY, null);
             nextProfile = normalizeProfile(JSON.parse(store.get(DEMO_PROFILE_KEY) ?? "null"));
           } else {
-            accept(toDataset({ ok: true, expenses: json.expenses, emis: json.emis, investments: json.investments, generatedAt: json.generatedAt }), true);
+            accept(toDataset({ ok: true, ...sheetRows(json) }), true);
             store.set(CACHE_KEY, JSON.stringify(json));
             nextProfile = json.profile ?? null;
           }
@@ -300,7 +310,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         setConfig(json.config);
         setUser(json.user ?? null);
         setProfile(json.profile ?? null);
-        accept(toDataset({ ok: true, expenses: json.expenses, emis: json.emis, investments: json.investments, generatedAt: json.generatedAt }), false);
+        accept(toDataset({ ok: true, ...sheetRows(json) }), false);
       }
     } catch {
       store.set(CACHE_KEY, null);

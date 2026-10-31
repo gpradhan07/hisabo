@@ -1,7 +1,7 @@
 "use client";
 
 import { CalendarClock, CircleAlert, CircleCheck, Clock, Landmark, Plus } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ColumnChart } from "@/components/charts/column-chart";
 import { Ring } from "@/components/charts/small";
 import { useDashboard } from "@/components/data-provider";
@@ -21,7 +21,7 @@ export function EmisView() {
   const rows = useMemo(
     () =>
       (data?.emis ?? [])
-        .map((e) => emiProgress(e, now))
+        .map((e) => emiProgress(e, now, data?.emiPayments))
         .sort((a, b) => ORDER[a.status] - ORDER[b.status] || (a.nextDue?.getTime() ?? Infinity) - (b.nextDue?.getTime() ?? Infinity)),
     [data, now],
   );
@@ -76,6 +76,7 @@ export function EmisView() {
               <EmiCard key={r.emi.id} p={r} fmt={fmt} />
             ))}
           </div>
+          {data.emiPayments.length > 0 && <Payments className="lg:col-span-12" />}
         </div>
       )}
     </>
@@ -240,7 +241,7 @@ function EmiCard({ p, fmt }: { p: EmiProgress; fmt: Formatters }) {
           <StatusBadge p={p} />
         </div>
         <p className="mt-0.5 text-[13px] text-ink-2">
-          <span className="font-semibold text-ink">{fmt.money(emi.monthly)}</span>/mo · {emi.tenure} months
+          <span className="font-semibold text-ink">{fmt.money(emi.monthly)}</span>/mo · {emi.tenure} months{emi.type && <> · {emi.type}</>}
         </p>
         <dl className="mt-3 grid grid-cols-2 gap-2 text-[12px]">
           <div>
@@ -266,12 +267,19 @@ function EmiCard({ p, fmt }: { p: EmiProgress; fmt: Formatters }) {
             </div>
           )}
         </dl>
+        {p.tracked && (
+          <p className="mt-2 text-[12px] text-ink-3">
+            Counted from {p.recorded} recorded {p.recorded === 1 ? "payment" : "payments"}
+            {emi.paidBefore > 0 && ` + ${emi.paidBefore} paid before`}
+          </p>
+        )}
       </div>
     </section>
   );
 }
 
 function StatusBadge({ p }: { p: EmiProgress }) {
+  if (p.overdue) return <Badge tone="warn"><CircleAlert size={11} /> Payment due</Badge>;
   switch (p.status) {
     case "active":
       return <Badge tone="brand"><CalendarClock size={11} /> Active</Badge>;
@@ -282,4 +290,36 @@ function StatusBadge({ p }: { p: EmiProgress }) {
     case "unknown":
       return <Badge tone="warn"><CircleAlert size={11} /> No start date</Badge>;
   }
+}
+
+/** EMI payments recorded from the Shortcut (Record payment), newest first. */
+function Payments({ className }: { className?: string }) {
+  const { data, fmt } = useDashboard();
+  const [all, setAll] = useState(false);
+  const list = data!.emiPayments;
+  const shown = all ? list : list.slice(0, 6);
+  return (
+    <Card className={className} title="Recorded payments" subtitle={`${list.length} from your Shortcut, newest first`}>
+      <ul className="-my-3 divide-y divide-line">
+        {shown.map((p) => (
+          <li key={p.id} className="flex items-center gap-3 py-3">
+            <div className="grid w-11 shrink-0 place-items-center rounded-lg bg-surface-2 py-1 text-center leading-tight">
+              <span className="text-[11px] font-semibold text-brand-ink uppercase">{fmtMonthShort(p.date)}</span>
+              <span className="text-[16px] font-semibold text-ink">{p.date.getDate()}</span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[14px] font-medium text-ink">{p.emiName}</p>
+              <p className="truncate text-[12px] text-ink-2">{[p.paymentMethod, p.cardName, p.remark].filter(Boolean).join(" · ") || "Payment"}</p>
+            </div>
+            <span className="shrink-0 text-[14px] font-semibold tabular-nums text-ink">{fmt.moneyExact(p.amount)}</span>
+          </li>
+        ))}
+      </ul>
+      {list.length > 6 && (
+        <Button variant="outline" className="mt-4 w-full" onClick={() => setAll(!all)}>
+          {all ? "Show fewer" : `Show all ${list.length}`}
+        </Button>
+      )}
+    </Card>
+  );
 }

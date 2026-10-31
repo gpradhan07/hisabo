@@ -13,36 +13,23 @@ import {
   Vault,
   type LucideIcon,
 } from "lucide-react";
-import { addMonths } from "./dates";
+import { advance, interval, perMonth, type Interval } from "./recurring";
 import type { Expense, Investment } from "./types";
 
 /** Investments shaped like expenses (type → category), so the shared chart helpers work on them. */
 export const asSeries = (list: Investment[]): Expense[] =>
-  list.map((i) => ({ id: i.id, date: i.date, amount: i.amount, category: i.type, remark: i.remark }));
+  list.map((i) => ({ id: i.id, date: i.date, amount: i.amount, category: i.type, remark: i.name || i.remark }));
 
-/** Months between instalments for each recurring frequency; null for one-time. */
-export function stepMonths(frequency: string): number | null {
-  switch (frequency) {
-    case "Monthly":
-      return 1;
-    case "Quarterly":
-      return 3;
-    case "Half-yearly":
-      return 6;
-    case "Yearly":
-      return 12;
-    default:
-      return null;
-  }
-}
+/** What to call an investment: its name (fund, stock, scheme), else the note, else the type. */
+export const investmentTitle = (i: Investment) => i.name || i.remark || i.type;
 
 export interface Plan {
   key: string;
-  /** the remark (fund / scheme name) or the type when there's no remark */
+  /** the investment's name (fund / scheme), else its note, else its type */
   name: string;
   type: string;
   frequency: string;
-  step: number;
+  interval: Interval;
   /** most recent instalment */
   amount: number;
   total: number;
@@ -53,43 +40,45 @@ export interface Plan {
   /** false once it has missed more than one instalment (probably stopped) */
   active: boolean;
   paymentMethod: string;
+  platform: string;
 }
 
-/** Recurring investments (SIPs etc.), one per type + remark, biggest first. */
+/** Recurring investments (SIPs etc.), one per type + name, biggest first. */
 export function investmentPlans(list: Investment[], now: Date): Plan[] {
   const groups = new Map<string, Investment[]>();
   for (const i of list) {
-    if (!stepMonths(i.frequency)) continue;
-    const key = `${i.type}|${i.remark.toLowerCase()}`;
+    if (!interval(i.frequency)) continue;
+    const key = `${i.type}|${(i.name || i.remark).toLowerCase()}`;
     groups.set(key, [...(groups.get(key) ?? []), i]);
   }
   return [...groups.entries()]
     .map(([key, items]) => {
       const sorted = [...items].sort((a, b) => b.date.getTime() - a.date.getTime());
       const latest = sorted[0];
-      const step = stepMonths(latest.frequency)!;
-      const next = addMonths(latest.date, step);
+      const iv = interval(latest.frequency)!;
+      const next = advance(latest.date, iv);
       return {
         key,
-        name: latest.remark || latest.type,
+        name: investmentTitle(latest),
         type: latest.type,
         frequency: latest.frequency,
-        step,
+        interval: iv,
         amount: latest.amount,
         total: items.reduce((s, i) => s + i.amount, 0),
         count: items.length,
         first: sorted.at(-1)!.date,
         last: latest.date,
         next,
-        active: now < addMonths(latest.date, step * 2),
+        active: now < advance(latest.date, iv, 2),
         paymentMethod: latest.paymentMethod,
+        platform: latest.platform,
       };
     })
     .sort((a, b) => Number(b.active) - Number(a.active) || b.total - a.total);
 }
 
 /** What the active plans add up to per month (a yearly ₹12,000 counts as ₹1,000). */
-export const monthlyCommitment = (plans: Plan[]) => plans.filter((p) => p.active).reduce((s, p) => s + p.amount / p.step, 0);
+export const monthlyCommitment = (plans: Plan[]) => plans.filter((p) => p.active).reduce((s, p) => s + perMonth(p.amount, p.interval), 0);
 
 const ICONS: [RegExp, LucideIcon][] = [
   [/mutual|mf|sip|fund|elss|index/i, ChartPie],

@@ -4,6 +4,8 @@ export interface Expense {
   amount: number;
   category: string;
   remark: string;
+  /** where the money went (Swiggy, Amazon); a subscription payment carries the service's name */
+  merchant?: string;
 }
 
 export interface Emi {
@@ -14,6 +16,37 @@ export interface Emi {
   total: number;
   startDate: Date | null;
   addedOn: Date | null;
+  /** Credit Card EMI, Bank Loan, BNPL, Other */
+  type: string;
+  /** instalments already paid before it was added to hisabo */
+  paidBefore: number;
+  remark: string;
+}
+
+/** One row of the "EMI Payments" tab: a monthly instalment recorded from the Shortcut. */
+export interface EmiPayment {
+  id: string;
+  date: Date;
+  /** matches an EMI's name */
+  emiName: string;
+  amount: number;
+  paymentMethod: string;
+  cardName: string;
+  remark: string;
+}
+
+/** One payment from the "Subscriptions" tab (Netflix, Spotify, a gym…). */
+export interface Subscription {
+  id: string;
+  date: Date;
+  amount: number;
+  name: string;
+  /** Weekly, Monthly, Quarterly, Half-yearly, Yearly or One-time */
+  frequency: string;
+  autoRenew: boolean;
+  paymentMethod: string;
+  cardName: string;
+  remark: string;
 }
 
 /** One row of the sheet's "Investments" tab. */
@@ -27,11 +60,20 @@ export interface Investment {
   frequency: string;
   paymentMethod: string;
   remark: string;
+  /** e.g. Nifty 50 Index Fund */
+  name: string;
+  /** where it's held: Groww, Zerodha, a bank… */
+  platform: string;
+  /** the credit card, when paid with one */
+  cardName: string;
 }
 
 export interface Dataset {
-  expenses: Expense[]; // sorted newest first
+  /** sorted newest first; includes subscription payments (category "Subscriptions") so they count as spending */
+  expenses: Expense[];
+  subscriptions: Subscription[]; // sorted newest first
   emis: Emi[];
+  emiPayments: EmiPayment[]; // sorted newest first
   investments: Investment[]; // sorted newest first
   syncedAt: Date;
 }
@@ -79,7 +121,9 @@ export type DataPayload =
       unchanged?: boolean;
       generatedAt?: string;
       expenses?: ApiResponse["expenses"];
+      subscriptions?: ApiResponse["subscriptions"];
       emis?: ApiResponse["emis"];
+      emiPayments?: ApiResponse["emiPayments"];
       investments?: ApiResponse["investments"];
     }
   | { ok: false; error: string };
@@ -95,6 +139,19 @@ export interface ApiResponse {
     amount: number | string;
     category: string;
     remark: string;
+    merchant?: string;
+  }[];
+  /** only from the v4 script */
+  subscriptions?: {
+    row: number;
+    date: string | null;
+    amount: number | string;
+    name: string;
+    frequency: string;
+    autoRenew: string;
+    paymentMethod: string;
+    cardName: string;
+    remark: string;
   }[];
   profile?: Record<string, unknown> | null;
   emis?: {
@@ -105,6 +162,19 @@ export interface ApiResponse {
     tenure: number | string;
     total: number | string;
     startDate: string | null;
+    emiType?: string;
+    paidBefore?: number | string;
+    remark?: string;
+  }[];
+  /** only from the v4 script */
+  emiPayments?: {
+    row: number;
+    date: string | null;
+    emiName: string;
+    amount: number | string;
+    paymentMethod: string;
+    cardName: string;
+    remark: string;
   }[];
   /** only from the v3 script (with investments) */
   investments?: {
@@ -115,5 +185,8 @@ export interface ApiResponse {
     frequency: string;
     paymentMethod: string;
     remark: string;
+    investmentName?: string;
+    platform?: string;
+    cardName?: string;
   }[];
 }
