@@ -6,6 +6,10 @@ export interface Expense {
   remark: string;
   /** where the money went (Swiggy, Amazon); a subscription payment carries the service's name */
   merchant?: string;
+  /** how it was paid, as the Shortcut sends it ("UPI (Credit Card)", "Cash"…) */
+  paymentMethod?: string;
+  /** the credit card, when it was paid by card ("Kotak CC") */
+  cardName?: string;
 }
 
 export interface Emi {
@@ -64,6 +68,12 @@ export interface Investment {
   name: string;
   /** where it's held: Groww, Zerodha, a bank… */
   platform: string;
+  /** set on a plan's latest entry by "Stop SIP": no automatic instalments from this date */
+  stoppedOn?: Date | null;
+  /** an instalment hisabo counts by itself (not in the sheet); see withAutoInstalments */
+  auto?: boolean;
+  /** the plan it belongs to, numbered when two plans share a name ("Post office 2"); see withAutoInstalments */
+  planName?: string;
   /** the credit card, when paid with one */
   cardName: string;
 }
@@ -91,9 +101,13 @@ export interface Profile {
 /** Non-secret settings the server shares with the browser */
 export interface ClientConfig {
   currency: string;
+  /** hosted mode: per-user accounts, phone pairing (Add to iPhone) */
+  hosted: boolean;
   monthlyBudget: number | null;
   /** Pusher channel the Apps Script pings when the sheet changes; null when live updates aren't set up */
   realtime: RealtimeConfig | null;
+  /** hosted mode: the Firebase project the dashboard listens to for changes (public values; see lib/server/live.ts) */
+  live?: { apiKey: string; projectId: string } | null;
 }
 
 /** Public Pusher settings. The secret stays in Apps Script. */
@@ -113,8 +127,12 @@ export type DataPayload =
       demo: boolean;
       version: string;
       config: ClientConfig;
-      /** signed-in username */
+      /** signed-in username (self-host) or email (hosted) */
       user: string;
+      /** hosted: the Google account whose Drive holds the spreadsheet */
+      sheetOwner?: string;
+      /** hosted: the user's spreadsheet in Google Sheets */
+      sheetUrl?: string;
       /** included whenever the rows are */
       profile?: Profile | null;
       /** true when the client already has this version; the rows are omitted */
@@ -126,9 +144,9 @@ export type DataPayload =
       emiPayments?: ApiResponse["emiPayments"];
       investments?: ApiResponse["investments"];
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; /** hosted: Google Drive must be (re)connected */ code?: "connect-drive" };
 
-/** Shape returned by doGet in apps-script/Code.gs */
+/** Shape returned by doGet in apps-script/Code.gs (and by the Google Sheets store, row for row) */
 export interface ApiResponse {
   ok: boolean;
   error?: string;
@@ -139,6 +157,8 @@ export interface ApiResponse {
     amount: number | string;
     category: string;
     remark: string;
+    paymentMethod?: string;
+    cardName?: string;
     merchant?: string;
   }[];
   /** only from the v4 script */
@@ -162,6 +182,8 @@ export interface ApiResponse {
     tenure: number | string;
     total: number | string;
     startDate: string | null;
+    paymentMethod?: string;
+    cardName?: string;
     emiType?: string;
     paidBefore?: number | string;
     remark?: string;
@@ -188,5 +210,6 @@ export interface ApiResponse {
     investmentName?: string;
     platform?: string;
     cardName?: string;
+    stoppedOn?: string | null;
   }[];
 }

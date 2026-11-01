@@ -1,7 +1,7 @@
 "use client";
 
 import { LoaderCircle } from "lucide-react";
-import { createElement, useState, type FormEvent, type ReactNode } from "react";
+import { createElement, useState, type SubmitEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,6 +11,7 @@ import { EXPENSE_CATEGORIES, categoryIcon } from "@/lib/categories";
 import { isSameDay, startOfDay } from "@/lib/dates";
 import type { ExpenseErrors } from "@/lib/expense-input";
 import { currencySymbol, fmtDay } from "@/lib/format";
+import type { Expense } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useDashboard } from "./data-provider";
 import { DatePicker, TimePicker } from "./date-time-pickers";
@@ -18,34 +19,46 @@ import { SuggestInput } from "./suggest-input";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Manually log an expense (any past date), saved to the sheet like the Shortcut's. */
+/** Manually log an expense (any past date), saved to the sheet like the Shortcut's. Also edits one (Transactions). */
 export function AddExpenseDialog() {
-  const { addOpen, setAddOpen } = useDashboard();
+  const { addOpen, setAddOpen, editing, setEditing } = useDashboard();
+  const open = addOpen || editing !== null;
+  const close = () => {
+    setAddOpen(false);
+    setEditing(null);
+  };
   return (
-    <Dialog open={addOpen} onOpenChange={setAddOpen}>
+    <Dialog open={open} onOpenChange={(next) => !next && close()}>
       <DialogContent className="max-h-[92dvh] overflow-y-auto rounded-xl sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="text-[20px] font-semibold tracking-tight">Add expense</DialogTitle>
-          <DialogDescription>Log something you forgot, on the day it actually happened.</DialogDescription>
+          <DialogTitle className="text-[20px] font-semibold tracking-tight">{editing ? "Edit expense" : "Add expense"}</DialogTitle>
+          <DialogDescription>
+            {editing ? "Your Google Sheet changes too. How it was paid stays as it is." : "Log something you forgot, on the day it actually happened."}
+          </DialogDescription>
         </DialogHeader>
-        {addOpen && <ExpenseForm onDone={() => setAddOpen(false)} />}
+        {open && <ExpenseForm key={editing?.id ?? "new"} initial={editing} onDone={close} />}
       </DialogContent>
     </Dialog>
   );
 }
 
-function ExpenseForm({ onDone }: { onDone: () => void }) {
-  const { addExpense, fmt, config, demo } = useDashboard();
+function ExpenseForm({ initial, onDone }: { initial: Expense | null; onDone: () => void }) {
+  const { addExpense, updateExpense, fmt, config, demo } = useDashboard();
   // Read the clock once when the form opens (not on every render).
   const [opened] = useState(() => new Date());
   const today = startOfDay(opened);
-  const [category, setCategory] = useState("");
-  const [day, setDay] = useState<Date>(today);
-  const [time, setTime] = useState(() => `${pad(opened.getHours())}:${pad(opened.getMinutes())}`);
+  const [category, setCategory] = useState(initial?.category ?? "");
+  const [day, setDay] = useState<Date>(() => (initial ? startOfDay(initial.date) : today));
+  const [time, setTime] = useState(() => {
+    const at = initial?.date ?? opened;
+    return `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  });
   const [errors, setErrors] = useState<ExpenseErrors>({});
   // A field's error goes away as soon as you change that field.
   const clearError = (field: string) => setErrors((e) => (field in e ? Object.fromEntries(Object.entries(e).filter(([k]) => k !== field)) : e));
-  const [formError, setFormError] = useState<string | null>(demo ? "This is demo data. Connect your Google Sheet to add expenses." : null);
+  const [formError, setFormError] = useState<string | null>(
+    demo ? `This is demo data. Connect your Google Sheet to ${initial ? "edit" : "add"} expenses.` : null,
+  );
   const [pending, setPending] = useState(false);
   // not from `fmt`: with amounts hidden that would give "₹••••"
   const symbol = currencySymbol(config.currency);
@@ -59,7 +72,7 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
     }
   };
 
-  async function submit(e: FormEvent<HTMLFormElement>) {
+  async function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const [hh, mm] = time.split(":").map(Number);
@@ -69,14 +82,15 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
 
     setPending(true);
     setFormError(null);
-    const res = await addExpense({ amount, category, remark, date: when.toISOString() });
+    const input = { amount, category, remark, date: when.toISOString() };
+    const res = initial ? await updateExpense(initial, input) : await addExpense(input);
     setPending(false);
     if (!res.ok) {
       setErrors(res.fieldErrors ?? {});
       setFormError(res.fieldErrors ? null : res.error);
       return;
     }
-    toast.success(`Added ${fmt.moneyExact(Number(amount.replace(/[^0-9.]/g, "")))} · ${category.trim()}`, {
+    toast.success(`${initial ? "Saved" : "Added"} ${fmt.moneyExact(Number(amount.replace(/[^0-9.]/g, "")))} · ${category.trim()}`, {
       description: isSameDay(when, new Date()) ? "Today" : `Filed under ${fmtDay(when)}`,
     });
     onDone();
@@ -95,6 +109,7 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
             inputMode="decimal"
             autoComplete="off"
             autoFocus
+            defaultValue={initial ? String(initial.amount) : undefined}
             placeholder="0.00"
             aria-invalid={!!errors.amount}
             className="h-14 pl-10 text-[24px] font-semibold tabular-nums"
@@ -130,6 +145,7 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
           name="remark"
           maxLength={100}
           autoComplete="off"
+          defaultValue={initial?.remark}
           placeholder="e.g. Dinner with friends"
           aria-invalid={!!errors.remark}
           className="h-11 text-[16px] sm:text-[14px]"
@@ -161,7 +177,7 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
         </Button>
         <Button type="submit" size="lg" disabled={pending || demo} className="min-w-32">
           {pending && <LoaderCircle className="animate-spin" aria-hidden />}
-          {pending ? "Saving…" : "Add expense"}
+          {pending ? "Saving…" : initial ? "Save changes" : "Add expense"}
         </Button>
       </DialogFooter>
     </form>

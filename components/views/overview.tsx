@@ -23,14 +23,15 @@ import { useMemo, useState } from "react";
 import { ColumnChart } from "@/components/charts/column-chart";
 import { Donut, type DonutSegment } from "@/components/charts/donut";
 import { PaceChart } from "@/components/charts/pace-chart";
-import { RadialProgress, Sparkline } from "@/components/charts/small";
+import { RadialProgress } from "@/components/charts/small";
 import { CategoryAvatar } from "@/components/category-avatar";
 import { useDashboard } from "@/components/data-provider";
 import { PageHeader } from "@/components/page-header";
 import { SERIES_COLORS, slotColor, usePeriodData } from "@/components/use-period-data";
-import { Amount, Badge, Card, Delta, EmptyState, Segmented, Skeleton, StatGrid, StatTile, ToneIcon, TrendBadge, cx } from "@/components/kit";
-import { MAX_SERIES, cumulativeByDay, emiDueInRange, emiProgress, inRange, sum } from "@/lib/analytics";
+import { Amount, Badge, Card, Delta, EmptyState, Segmented, Skeleton, StatGrid, StatTile, ToneIcon, cx } from "@/components/kit";
+import { MAX_SERIES, byCategory, cumulativeByDay, emiDueInRange, emiProgress, inRange, sum } from "@/lib/analytics";
 import { expenseTitle } from "@/lib/api";
+import { tillPayday, upcomingPayments, type Upcoming } from "@/lib/cashflow";
 import { addDays, addMonths, daysBetween, isSameDay, startOfDay, startOfMonth } from "@/lib/dates";
 import { fmtDay, fmtMonthShort, fmtShortDate, fmtTime } from "@/lib/format";
 import { daysToPayday, firstName, greeting } from "@/lib/profile";
@@ -60,7 +61,7 @@ export function OverviewView() {
           <WhereItWent className="lg:col-span-4" />
           <Insights className="lg:col-span-4" />
           <Recent className="lg:col-span-4" />
-          <UpcomingEmis className="lg:col-span-4" />
+          <ComingUp className="lg:col-span-4" />
         </div>
       )}
     </>
@@ -121,7 +122,7 @@ function GreetingChips() {
       {profile.monthlyIncome ? (
         <Badge tone={fmt.hidden ? "neutral" : spent > profile.monthlyIncome ? "bad" : spent > profile.monthlyIncome * 0.8 ? "warn" : "neutral"}>
           <Wallet className="size-3.5" />
-          {fmt.hidden ? "••%" : fmt.percent(spent / profile.monthlyIncome)} of income spent this month
+          {fmt.hidden ? "••%" : fmt.percent(spent / profile.monthlyIncome)} of income used this month, incl. EMIs
         </Badge>
       ) : null}
     </div>
@@ -141,7 +142,7 @@ function paceAxis(range: Range, days: number) {
 }
 
 function Hero({ className }: { className?: string }) {
-  const { data, range, fmt, budget } = useDashboard();
+  const { data, range, fmt, budget, now } = useDashboard();
   const pd = usePeriodData()!;
 
   const pace = useMemo(() => {
@@ -154,9 +155,15 @@ function Hero({ className }: { className?: string }) {
   const axis = paceAxis(range, Math.max(pace.current.length, pace.reference?.length ?? 0));
 
   const change = pd.prevTotal ? (pd.total - pd.prevTotal) / pd.prevTotal : null;
-  const dailyAvg = pd.total / range.elapsedDays;
+  // Per day from day-to-day spending: with rent in, day 2 of the month read ₹9,000 a day.
+  const dailyPerDay = pd.dailyTotal / range.elapsedDays;
+  const spendDays = new Set(pd.daily.map((e) => startOfDay(e.date).getTime())).size;
   const months = Math.max(1, Math.round(range.elapsedDays / 30.44));
   const currentLabel = range.title.replace(/^Spent (in |all time)/, "") || "All time";
+  // ₹0 would read as "spent nothing then"; with no entries that old, there's simply nothing to compare.
+  const hasEarlier = !range.prev || data!.expenses.some((e) => e.date < range.prev!.end);
+  // A fact, not a projection: one early payment like rent made a month-end estimate wildly off.
+  const spentToday = sum(pd.items.filter((e) => isSameDay(e.date, now)));
 
   return (
     <section className={cx("hero-surface overflow-hidden p-5 sm:p-7", className)}>
@@ -169,14 +176,24 @@ function Hero({ className }: { className?: string }) {
         </div>
         <p className="mt-2 text-[44px] leading-none font-semibold tracking-tight text-white sm:text-[58px]"><Amount text={fmt.money(pd.total)} /></p>
         <div className="mt-3">{range.prev ? <Delta onBrand change={change} label={range.prev.label} /> : null}</div>
+        {/* What the total is made of, so one rent payment doesn't hide how day-to-day spending is going */}
+        {pd.fixedTotal > 0 && (
+          <p className="mt-2.5 text-[13px] text-white/75">
+            Rent & subscriptions <span className="font-semibold text-white"><Amount text={fmt.money(pd.fixedTotal)} /></span> · Day-to-day{" "}
+            <span className="font-semibold text-white"><Amount text={fmt.money(pd.dailyTotal)} /></span>
+          </p>
+        )}
 
-        <dl className="mt-5 grid grid-cols-3 gap-3 border-t border-white/15 pt-4">
-          <HeroStat label={range.prev?.short ?? "Monthly average"} value={fmt.money(range.prev ? (pd.prevTotal ?? 0) : pd.total / months)} />
-          <HeroStat label="Per day" value={fmt.money(dailyAvg)} />
+        <dl className="mt-5 grid grid-cols-3 gap-3 border-t border-white/15 pt-5">
+          <HeroStat
+            label={range.prev?.short ?? "Monthly average"}
+            value={!range.prev ? fmt.money(pd.total / months) : hasEarlier ? fmt.money(pd.prevTotal ?? 0) : "No data yet"}
+          />
+          <HeroStat label="Day-to-day, per day" value={fmt.money(dailyPerDay)} />
           {range.id === "this-month" ? (
-            <HeroStat label="On pace for" value={fmt.money(dailyAvg * range.totalDays)} />
+            <HeroStat label="Spent today" value={spentToday ? fmt.money(spentToday) : "Nothing yet"} />
           ) : (
-            <HeroStat label={budget ? "Budget/month" : "Days"} value={budget ? fmt.money(budget) : String(range.elapsedDays)} />
+            <HeroStat label="Days with spending" value={`${spendDays} of ${range.elapsedDays}`} />
           )}
         </dl>
 
@@ -201,9 +218,10 @@ function Hero({ className }: { className?: string }) {
 
 function HeroStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
-      <dt className="truncate text-[11px] text-white/70 sm:text-[12px]">{label}</dt>
-      <dd className="mt-0.5 truncate text-[14px] font-semibold text-white sm:text-[16px]">
+    // A label may wrap to two lines on a phone; the values still line up along the bottom.
+    <div className="flex min-w-0 flex-col justify-between">
+      <dt className="text-[11px] leading-snug text-balance text-white/70 sm:text-[12px]">{label}</dt>
+      <dd className="mt-1 truncate text-[14px] font-semibold text-white sm:text-[16px]">
         <Amount text={value} />
       </dd>
     </div>
@@ -235,24 +253,24 @@ function BudgetCard({ className }: { className?: string }) {
   }
 
   const used = spent / budget;
-  const projected = (spent / Math.max(1, now.getDate())) * daysInMonth;
-  const state = spent > budget ? "over" : projected > budget * 1.02 ? "risk" : "ok";
-  const color = state === "over" ? "var(--bad)" : state === "risk" ? "var(--warn)" : "var(--brand)";
+  // What's actually used, never a month-end guess (rent on the 1st made that guess say "At risk" on day 2).
+  const state = spent > budget ? "over" : used >= 0.9 ? "near" : "ok";
+  const color = state === "over" ? "var(--bad)" : state === "near" ? "var(--warn)" : "var(--brand)";
   const perDay = Math.max(0, budget - spent) / Math.max(1, daysLeft);
 
   return (
     <Card
       className={cx("flex flex-col", className)}
       title={`${monthName} budget`}
-      subtitle={`${daysLeft} ${daysLeft === 1 ? "day" : "days"} left`}
+      subtitle={`${daysLeft} ${daysLeft === 1 ? "day" : "days"} left · EMIs not counted`}
       action={
         state === "ok" ? (
           <Badge tone="good">
-            <CircleCheck size={12} /> On track
+            <CircleCheck size={12} /> Within budget
           </Badge>
-        ) : state === "risk" ? (
+        ) : state === "near" ? (
           <Badge tone="warn">
-            <CircleAlert size={12} /> At risk
+            <CircleAlert size={12} /> Almost used
           </Badge>
         ) : (
           <Badge tone="bad">
@@ -266,10 +284,10 @@ function BudgetCard({ className }: { className?: string }) {
           <p className="text-[34px] leading-none font-semibold tracking-tight text-foreground">{Math.round(used * 100)}%</p>
           <p className="mt-1.5 text-[12px] text-muted-foreground">of {fmt.moneyCompact(budget)} used</p>
         </RadialProgress>
-        <dl className="grid w-full grid-cols-3 divide-x divide-line border-t border-line pt-4 text-center">
+        <dl className="grid w-full grid-cols-3 divide-x divide-line border-t border-line pt-5 text-center">
           <MiniStat label="Spent" value={fmt.moneyCompact(spent)} />
           <MiniStat label={spent > budget ? "Over by" : "Left"} value={fmt.moneyCompact(Math.abs(budget - spent))} />
-          <MiniStat label="Per day left" value={fmt.moneyCompact(perDay)} />
+          <MiniStat label="Can spend per day" value={fmt.moneyCompact(perDay)} />
         </dl>
       </div>
     </Card>
@@ -278,9 +296,10 @@ function BudgetCard({ className }: { className?: string }) {
 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 px-2">
-      <dt className="truncate text-[12px] text-ink-2">{label}</dt>
-      <dd className="mt-0.5 truncate text-[15px] font-semibold text-ink">{value}</dd>
+    // A label may wrap to two lines; the values still line up along the bottom.
+    <div className="flex min-w-0 flex-col justify-between px-2">
+      <dt className="text-[12px] leading-snug text-balance text-ink-2">{label}</dt>
+      <dd className="mt-1 truncate text-[15px] font-semibold text-ink">{value}</dd>
     </div>
   );
 }
@@ -288,53 +307,65 @@ function MiniStat({ label, value }: { label: string; value: string }) {
 // ─── KPI tiles ────────────────────────────────────────────────
 
 function Kpis() {
-  const { data, range, fmt } = useDashboard();
+  const { data, range, fmt, now, profile } = useDashboard();
   const pd = usePeriodData()!;
-  const past = pd.buckets.filter((b) => !b.future);
-  const spark = past.slice(-14);
   const emiDue = emiDueInRange(data!.emis, range.start, range.end);
   const activeEmis = data!.emis.filter((e) => emiProgress(e, range.dataEnd, data!.emiPayments).status === "active").length;
-  const top = pd.categories[0];
-  const dailyAvg = pd.total / range.elapsedDays;
-  const prevDays = range.prev ? Math.max(1, daysBetween(range.prev.start, range.prev.end)) : 0;
-  const prevDaily = range.prev && pd.prevTotal ? pd.prevTotal / prevDays : null;
-  const prevCount = range.prev && pd.previous.length ? pd.previous.length : null;
+  const top = byCategory(pd.daily)[0];
+  const week = upcomingPayments({ ...data!, now, until: addDays(startOfDay(now), 7) });
+  const left =
+    profile?.monthlyIncome && profile.payday
+      ? tillPayday({ income: profile.monthlyIncome, payday: profile.payday, expenses: data!.expenses, emis: data!.emis, subscriptions: data!.subscriptions, investments: data!.investments, now })
+      : null;
+  const biggest = pd.daily.reduce<(typeof pd.daily)[number] | null>((m, e) => (!m || e.amount > m.amount ? e : m), null);
 
   return (
     <StatGrid className="lg:col-span-12">
       <StatTile
-        label="Daily average"
-        value={fmt.money(dailyAvg)}
-        badge={prevDaily ? <TrendBadge change={(dailyAvg - prevDaily) / prevDaily} /> : undefined}
-        footer={`${range.elapsedDays} days`}
-        sub={prevDaily ? `${fmt.money(prevDaily)} before` : "per day"}
-        chart={<Sparkline values={spark.map((b) => b.total)} />}
-      />
-      <StatTile
-        label="Transactions"
-        value={pd.items.length.toLocaleString()}
-        badge={prevCount ? <TrendBadge change={(pd.items.length - prevCount) / prevCount} /> : undefined}
-        footer={pd.items.length ? `avg ${fmt.money(pd.total / pd.items.length)} each` : "none yet"}
-        sub={prevCount ? `${prevCount} before` : "this period"}
-        chart={<Sparkline values={spark.map((b) => b.count)} />}
-      />
-      <StatTile
         label="Top category"
         value={top?.category ?? "—"}
         badge={top ? <Badge tone="brand">{fmt.percent(top.share)}</Badge> : undefined}
-        footer={top ? `${fmt.money(top.total)} spent` : "no spending yet"}
-        sub={top ? `${top.count} ${top.count === 1 ? "expense" : "expenses"} this period` : undefined}
+        footer={top ? `${fmt.money(top.total)} spent` : "no day-to-day spending yet"}
+        sub={top ? "day-to-day only" : undefined}
       />
+      {left ? (
+        <StatTile
+          label="Left till payday"
+          value={fmt.money(left.left)}
+          badge={left.left < 0 ? <Badge tone="bad">Short</Badge> : undefined}
+          footer={left.left > 0 ? `${fmt.money(left.perDay)} a day for ${left.daysLeft} ${left.daysLeft === 1 ? "day" : "days"}` : `Payday in ${left.daysLeft} days`}
+          sub={`${fmt.moneyCompact(left.spent + left.invested)} spent · ${fmt.moneyCompact(left.committed)} still due`}
+        />
+      ) : (
+        <StatTile
+          label="Biggest expense"
+          value={biggest ? fmt.money(biggest.amount) : "—"}
+          footer={biggest ? expenseTitle(biggest) : "no day-to-day spending yet"}
+          sub={biggest ? fmtShortDate(biggest.date) : undefined}
+        />
+      )}
       <StatTile
         label="EMIs due"
         value={fmt.money(emiDue.amount)}
         badge={emiDue.count ? <Badge tone="neutral">{emiDue.count}×</Badge> : undefined}
-        footer={emiDue.count ? `${emiDue.count} ${emiDue.count === 1 ? "instalment" : "instalments"} this period` : "nothing due this period"}
+        footer={emiDue.count ? `${emiDue.count} ${emiDue.count === 1 ? "instalment" : "instalments"}` : "nothing due"}
         sub={`${activeEmis} active ${activeEmis === 1 ? "EMI" : "EMIs"}`}
+      />
+      <StatTile
+        label="Next 7 days"
+        value={fmt.money(week.reduce((s, u) => s + u.amount, 0))}
+        badge={week.length ? <Badge tone="neutral">{week.length}×</Badge> : undefined}
+        footer={week[0] ? `${week[0].name} ${dueIn(week[0], now)}` : "nothing due"}
+        sub="EMIs, renewals, SIPs"
       />
     </StatGrid>
   );
 }
+
+const dueIn = (u: Upcoming, now: Date) => {
+  const days = daysBetween(startOfDay(now), u.date);
+  return days <= 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`;
+};
 
 // ─── Spending over time ───────────────────────────────────────
 
@@ -470,17 +501,17 @@ function Insights({ className }: { className?: string }) {
       {list.length === 0 ? (
         <EmptyState icon={<Lightbulb size={20} />} title="Not enough data yet" body="Insights appear once a few expenses are logged." />
       ) : (
-        <ul className="-my-3 divide-y divide-line">
+        <ul className="-my-3.5 divide-y divide-line">
           {list.map((ins) => {
             const Icon = INSIGHT_ICON[ins.kind];
             return (
-              <li key={ins.kind} className="flex gap-3 py-3">
+              <li key={ins.kind} className="flex gap-3 py-3.5">
                 <ToneIcon tone={ins.tone === "good" ? "good" : ins.tone === "bad" ? "bad" : "brand"}>
                   <Icon size={17} />
                 </ToneIcon>
                 <div className="min-w-0">
                   <p className="text-[13px] font-semibold text-ink">{ins.title}</p>
-                  <p className="mt-0.5 text-[12px] leading-snug text-ink-2">{ins.body}</p>
+                  <p className="mt-1 text-[12px] leading-snug text-ink-2">{ins.body}</p>
                 </div>
               </li>
             );
@@ -520,7 +551,7 @@ function Recent({ className }: { className?: string }) {
                 <CategoryAvatar category={e.category} slots={pd.slots} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[14px] font-medium text-ink">{expenseTitle(e)}</p>
-                  <p className="truncate text-[12px] text-ink-2">
+                  <p className="mt-0.5 truncate text-[12px] text-ink-2">
                     {e.category} · {when}
                   </p>
                 </div>
@@ -534,52 +565,40 @@ function Recent({ className }: { className?: string }) {
   );
 }
 
-// ─── Upcoming EMIs ────────────────────────────────────────────
+// ─── Coming up ────────────────────────────────────────────────
 
-function UpcomingEmis({ className }: { className?: string }) {
+const KIND: Record<Upcoming["kind"], string> = { emi: "EMI", subscription: "Subscription", investment: "Investment" };
+
+/** One list of what's due soon: EMI instalments, subscription renewals and SIPs. */
+function ComingUp({ className }: { className?: string }) {
   const { data, fmt, now } = useDashboard();
-  const upcoming = data!.emis
-    .map((e) => emiProgress(e, now, data!.emiPayments))
-    .filter((p) => p.nextDue)
-    .sort((a, b) => a.nextDue!.getTime() - b.nextDue!.getTime())
-    .slice(0, 4);
+  const items = useMemo(() => upcomingPayments({ ...data!, now, until: addDays(startOfDay(now), 30) }), [data, now]);
+  const total = items.reduce((s, u) => s + u.amount, 0);
 
   return (
-    <Card
-      className={className}
-      title="Upcoming EMIs"
-      subtitle="Next instalments due"
-      action={
-        <Link href="/emis" className="inline-flex items-center gap-1 text-[13px] font-medium text-brand-ink hover:underline">
-          All <ArrowRight size={14} aria-hidden />
-        </Link>
-      }
-    >
-      {upcoming.length === 0 ? (
-        <EmptyState icon={<CalendarClock size={20} />} title="No upcoming EMIs" />
+    <Card className={className} title="Coming up" subtitle={items.length ? `Next 30 days · ${fmt.money(total)}` : "Next 30 days"}>
+      {items.length === 0 ? (
+        <EmptyState icon={<CalendarClock size={20} />} title="Nothing due in the next 30 days" body="EMIs, subscription renewals and SIPs show up here." />
       ) : (
-        <ul className="space-y-3">
-          {upcoming.map((p) => {
-            const days = daysBetween(now, p.nextDue!);
-            return (
-              <li key={p.emi.id} className="flex items-center gap-3">
-                <div className="grid w-11 shrink-0 place-items-center rounded-lg bg-surface-2 py-1 text-center leading-tight">
-                  <span className="text-[11px] font-semibold text-brand-ink uppercase">{fmtMonthShort(p.nextDue!)}</span>
-                  <span className="text-[16px] font-semibold text-ink">{p.nextDue!.getDate()}</span>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[14px] font-medium text-ink">{p.emi.name}</p>
-                  <p className="truncate text-[12px] text-ink-2">
-                    {p.status === "upcoming" ? "First instalment" : `Instalment ${p.paidMonths + 1} of ${p.emi.tenure}`} ·{" "}
-                    {days <= 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`}
-                  </p>
-                </div>
-                <span className="shrink-0 text-[14px] font-semibold tabular-nums text-ink">{fmt.money(p.emi.monthly)}</span>
-              </li>
-            );
-          })}
+        <ul className="-my-3.5 divide-y divide-line">
+          {items.slice(0, 5).map((u) => (
+            <li key={`${u.kind}${u.name}${u.date.getTime()}`} className="flex items-center gap-3 py-3.5">
+              <div className="grid w-11 shrink-0 place-items-center rounded-lg bg-surface-2 py-1 text-center leading-tight">
+                <span className="text-[11px] font-semibold text-brand-ink uppercase">{fmtMonthShort(u.date)}</span>
+                <span className="text-[16px] font-semibold text-ink">{u.date.getDate()}</span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[14px] font-medium text-ink">{u.name}</p>
+                <p className="mt-0.5 truncate text-[12px] text-ink-2">
+                  {u.kind === "emi" ? u.detail : KIND[u.kind]} · {dueIn(u, now)}
+                </p>
+              </div>
+              <span className="shrink-0 text-[14px] font-semibold tabular-nums text-ink">{fmt.money(u.amount)}</span>
+            </li>
+          ))}
         </ul>
       )}
+      {items.length > 5 && <p className="mt-5 text-[12px] text-ink-2">and {items.length - 5} more</p>}
     </Card>
   );
 }

@@ -33,7 +33,7 @@ export function PageHeader({
     <div className="mb-5 flex flex-col gap-4 sm:mb-6 lg:flex-row lg:items-end lg:justify-between">
       <div className="min-w-0">
         <h1 className={cn("text-[22px] leading-tight font-semibold tracking-tight sm:text-[28px]", titleClassName)}>{title}</h1>
-        <p className="mt-0.5 truncate text-[13px] text-muted-foreground">
+        <p className="mt-1 truncate text-[13px] text-muted-foreground">
           {subtitle ?? (data ? `${fmtDate(from)} – ${fmtDate(addDays(range.dataEnd, -1))}` : " ")}
         </p>
         {extra}

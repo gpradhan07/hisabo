@@ -8,16 +8,20 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
     "date-fns": "^4.4.0",
+    "firebase": "12.19.0",
+    "firebase-admin": "^14.5.0",
     "jose": "^6.2.12",
     "lucide-react": "^1.56.0",
     "next": "^16.4.3",
     "pusher-js": "^8.6.0",
+    "qrcode.react": "4.2.0",
     "radix-ui": "^1.8.1",
     "react": "^19.3.0",
     "react-day-picker": "^10.0.2",
@@ -36,6 +40,10 @@
     "eslint-config-next": "^16.4.3",
     "shadcn": "^4.21.4",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "jwks-rsa": "^3.2.2"
   }
 }

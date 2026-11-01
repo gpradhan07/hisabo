@@ -11,6 +11,8 @@ export const subscriptionExpenses = (list: Subscription[]): Expense[] =>
     category: "Subscriptions",
     remark: s.remark,
     merchant: s.name,
+    ...(s.paymentMethod ? { paymentMethod: s.paymentMethod } : {}),
+    ...(s.cardName ? { cardName: s.cardName } : {}),
   }));
 
 export type SubscriptionStatus =
@@ -29,6 +31,8 @@ export interface SubscriptionPlan {
   interval: Interval | null;
   /** the latest payment */
   amount: number;
+  /** the payment before it, to spot a price rise; null after one payment */
+  previousAmount: number | null;
   total: number;
   count: number;
   first: Date;
@@ -77,6 +81,7 @@ export function subscriptionPlans(list: Subscription[], now: Date): Subscription
         frequency: latest.frequency,
         interval: iv,
         amount: latest.amount,
+        previousAmount: sorted[1]?.amount ?? null,
         total: items.reduce((s, i) => s + i.amount, 0),
         count: items.length,
         first: sorted.at(-1)!.date,
@@ -90,6 +95,10 @@ export function subscriptionPlans(list: Subscription[], now: Date): Subscription
     })
     .sort((a, b) => ORDER[a.status] - ORDER[b.status] || (a.next?.getTime() ?? Infinity) - (b.next?.getTime() ?? Infinity) || b.total - a.total);
 }
+
+/** How much the latest payment went up from the one before (over ₹1 and over 5%), else 0. */
+export const priceRise = (p: SubscriptionPlan) =>
+  p.previousAmount !== null && p.amount - p.previousAmount > Math.max(1, p.previousAmount * 0.05) ? p.amount - p.previousAmount : 0;
 
 /** What the subscriptions that will renew cost per month (a yearly ₹1,499 counts as ₹125). */
 export const monthlySubscriptionCost = (plans: SubscriptionPlan[]) =>

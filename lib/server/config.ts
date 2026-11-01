@@ -3,6 +3,33 @@ import type { ClientConfig, RealtimeConfig } from "@/lib/types";
 
 const PLACEHOLDER_PASSWORD = "change-me";
 
+/**
+ * Hosted mode (v2): every user signs in (Google, or email + password) and gets a spreadsheet in their own
+ * Drive. It's on when Firebase and the Google OAuth client are configured; otherwise the app runs in
+ * self-host mode (one Apps Script sheet, the .env login).
+ */
+export function hostedConfig() {
+  const c = {
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID?.trim() ?? "",
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY?.trim() ?? "",
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL?.trim() ?? "",
+    privateKey: (process.env.FIREBASE_PRIVATE_KEY ?? "").replace(/\\n/g, "\n"),
+    googleClientId: process.env.GOOGLE_CLIENT_ID?.trim() ?? "",
+    googleClientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "",
+    tokenKey: process.env.TOKEN_ENCRYPTION_KEY?.trim() ?? "",
+    appUrl: (process.env.NEXT_PUBLIC_APP_URL?.trim() || "http://localhost:3000").replace(/\/+$/, ""),
+  };
+  const required = [c.projectId, c.apiKey, c.clientEmail, c.privateKey, c.googleClientId, c.googleClientSecret, c.tokenKey];
+  return required.every(Boolean) ? c : null;
+}
+
+export type HostedConfig = NonNullable<ReturnType<typeof hostedConfig>>;
+
+export const isHosted = () => hostedConfig() !== null;
+
+/** Where "Get the Shortcut" goes: the iCloud link when it's set, else the signed file in public/ (built for hisabo-app.netlify.app). */
+export const shortcutUrl = () => process.env.SHORTCUT_ICLOUD_URL?.trim() || "/hisabo.shortcut";
+
 export function sheetConfig() {
   return {
     url: process.env.APPS_SCRIPT_URL?.trim() ?? "",
@@ -12,9 +39,14 @@ export function sheetConfig() {
 
 /** Settings the browser is allowed to see. Never put secrets here. */
 export function clientConfig(): ClientConfig {
+  const currency = process.env.CURRENCY?.trim() || "INR";
+  // Hosted mode: the budget comes from each user's profile, and live updates come through Firebase, not Pusher.
+  const hosted = hostedConfig();
+  if (hosted) return { currency, hosted: true, monthlyBudget: null, realtime: null, live: { apiKey: hosted.apiKey, projectId: hosted.projectId } };
   const budget = Number(process.env.MONTHLY_BUDGET);
   return {
-    currency: process.env.CURRENCY?.trim() || "INR",
+    currency,
+    hosted: false,
     monthlyBudget: Number.isFinite(budget) && budget > 0 ? budget : null,
     realtime: realtimeConfig(),
   };

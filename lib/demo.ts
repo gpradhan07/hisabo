@@ -54,9 +54,26 @@ const SUBSCRIPTIONS: [string, number, number, number, number, boolean, string][]
   ["Udemy course", 499, 0, 2, 8, false, "UPI"],
 ];
 
+/** How sample expenses were paid, weighted like real UPI-first spending (cards only for UPI on a credit card) */
+const PAID_WITH: [string, string][] = [
+  ["UPI (Debit Card)", ""],
+  ["UPI (Debit Card)", ""],
+  ["UPI (Debit Card)", ""],
+  ["UPI (Credit Card)", "Kotak CC"],
+  ["UPI (Credit Card)", "IDFC CC"],
+  ["Cash", ""],
+  ["Apple Wallet", ""],
+];
+
 export function demoDataset(now = new Date()): Dataset {
   const rand = mulberry32(42);
   const pick = <T>(arr: T[]) => arr[Math.floor(rand() * arr.length)];
+  // Its own sequence, so adding payment methods left every other sample value as it was
+  const payRand = mulberry32(7);
+  const paidWith = () => {
+    const [paymentMethod, cardName] = PAID_WITH[Math.floor(payRand() * PAID_WITH.length)];
+    return { paymentMethod, ...(cardName ? { cardName } : {}) };
+  };
   const expenses: Expense[] = [];
   const first = addMonths(startOfMonth(now), -14);
   const today = startOfDay(now);
@@ -76,15 +93,15 @@ export function demoDataset(now = new Date()): Dataset {
         // Brand names are where the money went; the rest are notes.
         expenses.push(
           MERCHANTS.has(remark)
-            ? { id: `d${id++}`, date: at, amount, category: p.category, remark: "", merchant: remark }
-            : { id: `d${id++}`, date: at, amount, category: p.category, remark },
+            ? { id: `d${id++}`, date: at, amount, category: p.category, remark: "", merchant: remark, ...paidWith() }
+            : { id: `d${id++}`, date: at, amount, category: p.category, remark, ...paidWith() },
         );
       }
     }
     for (const m of MONTHLY) {
       if (d.getDate() === m.day) {
         const at = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 10, 0);
-        if (at <= now) expenses.push({ id: `d${id++}`, date: at, amount: m.amount, category: m.category, remark: m.remark });
+        if (at <= now) expenses.push({ id: `d${id++}`, date: at, amount: m.amount, category: m.category, remark: m.remark, paymentMethod: "UPI (Debit Card)" });
       }
     }
   }
@@ -147,8 +164,7 @@ export function demoDataset(now = new Date()): Dataset {
   };
   for (let m = addMonths(startOfMonth(now), -14); m <= now; m = addMonths(m, 1)) {
     const on = (day: number) => new Date(m.getFullYear(), m.getMonth(), day, 9, 30);
-    const k = m.getFullYear() * 12 + m.getMonth();
-    invest(on(5), k % 12 >= 9 ? 6000 : 5000, "Mutual Fund", "Monthly", "Auto-debit", "Parag Parikh Flexi Cap", "Groww");
+    invest(on(5), 5000, "Mutual Fund", "Monthly", "Auto-debit", "Parag Parikh Flexi Cap", "Groww");
     invest(on(10), 3000, "Mutual Fund", "Monthly", "Auto-debit", "Nifty 50 Index Fund", "Groww");
     invest(on(20), 1000, "Gold", "Monthly", "UPI", "Digital gold", "PhonePe");
     if (m.getMonth() % 3 === 0) invest(on(15), 6000, "NPS", "Quarterly", "Net Banking", "NPS Tier I");

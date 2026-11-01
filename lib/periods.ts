@@ -25,7 +25,7 @@ export interface Range {
   totalDays: number;
   granularity: Granularity;
   title: string;
-  /** label: sentence after the delta · short: names the comparison period */
+  /** label: sentence after the delta · short: names the comparison figure in plain words ("Same days last month") */
   prev: { start: Date; end: Date; label: string; short: string } | null;
   /** the whole previous period, drawn as the reference line on the pace chart */
   pace: { start: Date; end: Date; label: string } | null;
@@ -71,7 +71,7 @@ export function getRange(id: PeriodId, now: Date, earliest: Date | null): Range 
         start: prevStart,
         end: prevEnd < thisMonth ? prevEnd : thisMonth,
         label: `vs same days in ${monthName.format(prevStart)}`,
-        short: `${monthName.format(prevStart)} 1–${Math.min(elapsed, daysBetween(prevStart, thisMonth))}`,
+        short: "Same days last month",
       }, { start: prevStart, end: thisMonth, label: monthName.format(prevStart) });
     }
     case "last-month": {
@@ -81,7 +81,7 @@ export function getRange(id: PeriodId, now: Date, earliest: Date | null): Range 
         start: prevStart,
         end: start,
         label: `vs ${monthName.format(prevStart)}`,
-        short: `All of ${monthName.format(prevStart)}`,
+        short: `${monthName.format(prevStart)} total`,
       }, { start: prevStart, end: start, label: monthName.format(prevStart) });
     }
     case "90d": {
@@ -100,7 +100,7 @@ export function getRange(id: PeriodId, now: Date, earliest: Date | null): Range 
         start: prevStart,
         end: addDays(prevStart, daysBetween(start, tomorrow)),
         label: `vs same period in ${prevStart.getFullYear()}`,
-        short: `Same period ${prevStart.getFullYear()}`,
+        short: "Same time last year",
       }, { start: prevStart, end: start, label: String(prevStart.getFullYear()) });
     }
     case "all": {

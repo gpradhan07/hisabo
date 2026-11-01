@@ -1,10 +1,11 @@
 "use client";
 
-import { BarChart3, ChevronRight, Landmark, LayoutDashboard, Moon, Plus, ReceiptText, RefreshCw, Repeat, Sun, TrendingUp } from "lucide-react";
+import { BarChart3, ChevronRight, Landmark, LayoutDashboard, Moon, Plus, ReceiptText, RefreshCw, Repeat, Smartphone, Sun, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useId, useTransition, type CSSProperties, type ReactNode } from "react";
 import { logout } from "@/app/login/actions";
+import { forgetCachedData } from "@/lib/local-data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +45,9 @@ const NAV = [
   { href: "/subscriptions", label: "Subscriptions", short: "Subs", icon: Repeat },
   { href: "/emis", label: "EMIs", icon: Landmark },
 ];
+
+/** Hosted mode only; kept out of the phone tab bar (on phones it's in the profile dialog). */
+const SETUP_NAV = [{ href: "/add-to-iphone", label: "Add to iPhone", icon: Smartphone }];
 
 /** The app's name as a wordmark: "hisabo." with the dot in the brand mint. */
 export function Wordmark({ className }: { className?: string }) {
@@ -104,6 +108,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function AppSidebar() {
   const active = useActive();
+  const { config } = useDashboard();
   return (
     <Sidebar variant="sidebar" collapsible="icon">
       <SidebarHeader>
@@ -148,6 +153,30 @@ function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        {config.hosted && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Setup</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {SETUP_NAV.map(({ href, label, icon: Icon }) => (
+                  <SidebarMenuItem key={href}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={active(href)}
+                      tooltip={label}
+                      className="h-10 text-[14px] data-[active=true]:bg-brand-soft data-[active=true]:font-semibold data-[active=true]:text-brand-ink"
+                    >
+                      <Link href={href}>
+                        <Icon />
+                        <span>{label}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter>
@@ -219,7 +248,7 @@ function useAddAction() {
 function SiteHeader() {
   const { refresh, refreshing, demo } = useDashboard();
   const active = useActive();
-  const current = NAV.find((n) => active(n.href));
+  const current = [...NAV, ...SETUP_NAV].find((n) => active(n.href));
 
   return (
     <header className="pt-safe sticky top-0 z-20 flex shrink-0 items-center gap-2 border-b bg-background/80 backdrop-blur-xl">
@@ -259,7 +288,13 @@ function SignOutButton() {
   return (
     <Button
       variant="outline"
-      onClick={() => start(() => logout())}
+      onClick={() =>
+        start(() => {
+          // The next person on this browser shouldn't see your cached dashboard.
+          forgetCachedData();
+          return logout();
+        })
+      }
       disabled={pending}
       aria-busy={pending}
       className="ml-1 h-8 border-bad bg-transparent px-2.5 text-[13px] text-bad hover:bg-bad-soft hover:text-bad sm:px-3 dark:border-bad dark:bg-transparent dark:hover:bg-bad-soft"
@@ -293,12 +328,12 @@ function UserAvatar({ small = false }: { small?: boolean }) {
 }
 
 function UserLabel() {
-  const { user, demo, profile } = useDashboard();
+  const { user, demo, profile, sheetOwner } = useDashboard();
   return (
     <div className="grid flex-1 text-left text-sm leading-tight">
       <span className="truncate font-medium">{profile?.name ?? user ?? "Signed in"}</span>
-      <span className="truncate text-[12px] text-muted-foreground">
-        {profile?.email ?? (demo ? "Demo data" : "Google Sheet connected")}
+      <span className="truncate text-[12px] text-muted-foreground" title={sheetOwner ? `Your spreadsheet is in ${sheetOwner}'s Google Drive` : undefined}>
+        {sheetOwner ? `Drive: ${sheetOwner}` : (profile?.email ?? (demo ? "Demo data" : "Google Sheet connected"))}
       </span>
     </div>
   );
@@ -334,7 +369,7 @@ function useLiveText() {
   const now = useTicker(1000);
   const synced = checkedAt ? `Last synced ${syncedAgo(now, checkedAt)}` : "Not synced yet";
 
-  if (demo) return { tone: "warn", text: "Demo data", detail: "Add APPS_SCRIPT_URL to .env.local" };
+  if (demo) return { tone: "warn", text: "Sample data", detail: "Connect your sheet to see yours" };
   if (status === "loading") return { tone: "idle", text: "Connecting…", detail: "Reading your sheet" };
   if (status === "error") return { tone: "bad", text: "Offline", detail: error ?? "Couldn't reach your sheet" };
   switch (live) {

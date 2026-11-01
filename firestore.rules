@@ -1,0 +1,14 @@
+rules_version = '2';
+
+// hisabo (hosted mode). The server uses the Admin SDK, which these rules don't apply to. Browsers get one thing:
+// a signed-in user may read their own change signal (a timestamp), so the dashboard updates live (lib/server/live.ts).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /signals/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

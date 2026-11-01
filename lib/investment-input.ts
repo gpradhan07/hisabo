@@ -21,6 +21,7 @@ export interface ValidInvestment {
 /** What the form offers; the value is what goes into the sheet's Frequency column. */
 export const FREQUENCIES = [
   { value: "One-Time", label: "One-time" },
+  { value: "Weekly", label: "Weekly" },
   { value: "Monthly", label: "Monthly" },
   { value: "Quarterly", label: "Quarterly" },
   { value: "Yearly", label: "Yearly" },

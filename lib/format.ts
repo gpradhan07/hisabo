@@ -1,9 +1,9 @@
 export interface Formatters {
-  /** Always two decimals: 1234 → ₹1,234.00 */
+  /** Summary figures, whole rupees: 1234.5 → ₹1,235 */
   money: (n: number) => string;
-  /** Same as `money` (kept for call sites that format a single transaction) */
+  /** One transaction, to the paisa: 1234.5 → ₹1,234.50 */
   moneyExact: (n: number) => string;
-  /** Axis / tight spaces, still two decimals: ₹12.35K, ₹1.25L (under 1,000: ₹850.00) */
+  /** Axis / tight spaces: ₹12.4K, ₹1.3L (under 1,000: ₹850) */
   moneyCompact: (n: number) => string;
   percent: (n: number) => string;
   /** true while privacy mode hides amounts */
@@ -24,8 +24,9 @@ export function currencySymbol(currency: string): string {
 export function makeFormatters(currency: string, hidden = false): Formatters {
   const locale = currency === "INR" ? "en-IN" : undefined;
   const base = { style: "currency", currency } as const;
+  const whole = new Intl.NumberFormat(locale, { ...base, minimumFractionDigits: 0, maximumFractionDigits: 0 });
   const exact = new Intl.NumberFormat(locale, { ...base, minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const compact = new Intl.NumberFormat(locale, { ...base, notation: "compact", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const compact = new Intl.NumberFormat(locale, { ...base, notation: "compact", minimumFractionDigits: 0, maximumFractionDigits: 1 });
   const pct = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 0 });
 
   if (hidden) {
@@ -40,9 +41,9 @@ export function makeFormatters(currency: string, hidden = false): Formatters {
   }
 
   return {
-    money: (n) => exact.format(n),
+    money: (n) => whole.format(n),
     moneyExact: (n) => exact.format(n),
-    moneyCompact: (n) => (Math.abs(n) < 1000 ? exact.format(n) : compact.format(n)),
+    moneyCompact: (n) => (Math.abs(n) < 1000 ? whole.format(n) : compact.format(n)),
     percent: (n) => pct.format(n),
     hidden: false,
   };

@@ -1,7 +1,7 @@
 "use client";
 
 import { LoaderCircle } from "lucide-react";
-import { createElement, useMemo, useState, type FormEvent } from "react";
+import { createElement, useMemo, useState, type SubmitEvent } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -66,7 +66,7 @@ function InvestmentForm({ onDone }: { onDone: () => void }) {
   }, [data]);
   const types = allTypes.slice(0, 12);
 
-  async function submit(e: FormEvent<HTMLFormElement>) {
+  async function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     // Today → right now; an earlier day → midday, so it never lands on the wrong date.

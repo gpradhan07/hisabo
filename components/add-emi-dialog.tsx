@@ -1,7 +1,7 @@
 "use client";
 
 import { LoaderCircle } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -58,7 +58,7 @@ function EmiForm({ onDone }: { onDone: () => void }) {
       ? `${fmt.moneyExact(monthly * months)} in total · last instalment ${fmtMonth(addMonths(start, months - 1))}`
       : null;
 
-  async function submit(e: FormEvent<HTMLFormElement>) {
+  async function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const name = String(f.get("name") ?? "");

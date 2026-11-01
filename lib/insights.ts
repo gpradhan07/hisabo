@@ -1,5 +1,6 @@
 import { compareCategories, emiProgress, sum, topRemarks, weekdayAverages } from "./analytics";
 import { expenseTitle } from "./api";
+import { dayToDay } from "./cashflow";
 import { addMonths, daysBetween, startOfDay } from "./dates";
 import { fmtShortDate, type Formatters } from "./format";
 import type { Range } from "./periods";
@@ -17,7 +18,13 @@ export interface Insight {
   weight: number;
 }
 
-/** Plain-language observations about the selected period, strongest first. */
+/** A weekday pattern needs a few of each weekday before it means anything. */
+export const PATTERN_DAYS = 21;
+
+/**
+ * Plain-language observations about the selected period, strongest first. Facts only, no projections: one early
+ * rent payment made a "month-end estimate" wildly wrong. Patterns use day-to-day spending (rent and subscriptions out).
+ */
 export function buildInsights({
   range,
   current,
@@ -39,10 +46,12 @@ export function buildInsights({
 }): Insight[] {
   const out: Insight[] = [];
   const total = sum(current);
+  const daily = dayToDay(current);
+  const dailyTotal = sum(daily);
 
-  // Category movers
+  // Category movers (rent paid on the 1st one month and the 3rd the next isn't a change in habits)
   if (range.prev && previous.length) {
-    const changes = compareCategories(current, previous).filter((c) => c.change !== null && Math.abs(c.total - c.prevTotal) >= 500);
+    const changes = compareCategories(daily, dayToDay(previous)).filter((c) => c.change !== null && Math.abs(c.total - c.prevTotal) >= 500);
     const up = changes.filter((c) => c.change! > 0.2).sort((a, b) => b.total - b.prevTotal - (a.total - a.prevTotal))[0];
     const down = changes.filter((c) => c.change! < -0.2).sort((a, b) => a.total - a.prevTotal - (b.total - b.prevTotal))[0];
     if (up)
@@ -63,39 +72,39 @@ export function buildInsights({
       });
   }
 
-  // Budget pace (current month only)
+  // Budget (current month only): what's left, not a guess at the month-end
   if (budget && range.id === "this-month") {
-    const daysLeft = range.totalDays - range.elapsedDays;
-    const projected = (total / range.elapsedDays) * range.totalDays;
+    const daysLeft = range.totalDays - range.elapsedDays + 1;
+    const days = `${daysLeft} ${daysLeft === 1 ? "day" : "days"}`;
     if (total > budget) {
       out.push({
         kind: "budget",
         tone: "bad",
         title: "Over budget",
-        body: `${fmt.money(total - budget)} past your ${fmt.money(budget)} budget with ${daysLeft} days to go.`,
+        body: `${fmt.money(total - budget)} past your ${fmt.money(budget)} budget, with ${days} to go.`,
         weight: 95,
       });
-    } else if (projected > budget * 1.02) {
+    } else if (total >= budget * 0.9) {
       out.push({
         kind: "budget",
         tone: "bad",
-        title: `On pace to overshoot by ${fmt.money(projected - budget)}`,
-        body: `Keep to ${fmt.money((budget - total) / Math.max(1, daysLeft))}/day to finish on budget.`,
+        title: `Only ${fmt.money(budget - total)} of your budget left`,
+        body: `That's about ${fmt.money((budget - total) / daysLeft)} a day for the ${days} left.`,
         weight: 90,
       });
     } else {
       out.push({
         kind: "budget",
         tone: "good",
-        title: "On track with your budget",
-        body: `${fmt.money(budget - total)} left, about ${fmt.money((budget - total) / Math.max(1, daysLeft))} a day.`,
+        title: `${fmt.money(budget - total)} of your budget left`,
+        body: `About ${fmt.money((budget - total) / daysLeft)} a day for the ${days} left.`,
         weight: 60,
       });
     }
   }
 
   // Weekend vs weekday
-  const wd = weekdayAverages(current, range.start, range.dataEnd);
+  const wd = weekdayAverages(daily, range.start, range.dataEnd);
   const weekday = wd.slice(0, 5);
   const weekend = wd.slice(5);
   const avgOf = (rows: typeof wd) => {
@@ -104,43 +113,43 @@ export function buildInsights({
   };
   const wkd = avgOf(weekday);
   const wke = avgOf(weekend);
-  if (wkd > 0 && wke > 0 && range.elapsedDays >= 7) {
+  if (wkd > 0 && wke > 0 && range.elapsedDays >= PATTERN_DAYS) {
     const ratio = wke / wkd;
     if (ratio >= 1.25 || ratio <= 0.8)
       out.push({
         kind: "weekend",
         tone: "neutral",
         title: ratio >= 1 ? `Weekends cost ${ratio.toFixed(1)}× more` : "Weekdays cost more than weekends",
-        body: `${fmt.money(wke)} a day on weekends vs ${fmt.money(wkd)} on weekdays.`,
+        body: `${fmt.money(wke)} a day on weekends vs ${fmt.money(wkd)} on weekdays, not counting rent and subscriptions.`,
         weight: 50,
       });
   }
 
-  // Biggest single expense
-  const biggest = current.reduce<Expense | null>((m, e) => (!m || e.amount > m.amount ? e : m), null);
-  if (biggest && total > 0)
+  // Biggest single day-to-day expense (rent would win every month, which isn't news)
+  const biggest = daily.reduce<Expense | null>((m, e) => (!m || e.amount > m.amount ? e : m), null);
+  if (biggest && dailyTotal > 0)
     out.push({
       kind: "biggest",
       tone: "neutral",
       title: `Biggest: ${fmt.money(biggest.amount)}`,
-      body: `${expenseTitle(biggest)} on ${fmtShortDate(biggest.date)}, ${Math.round((biggest.amount / total) * 100)}% of the period.`,
+      body: `${expenseTitle(biggest)} on ${fmtShortDate(biggest.date)}, ${Math.round((biggest.amount / dailyTotal) * 100)}% of your day-to-day spending.`,
       weight: 40,
     });
 
-  // No-spend days
-  const spendDays = new Set(current.map((e) => startOfDay(e.date).getTime())).size;
+  // No-spend days (paying rent doesn't spoil one)
+  const spendDays = new Set(daily.map((e) => startOfDay(e.date).getTime())).size;
   const noSpend = range.elapsedDays - spendDays;
   if (range.elapsedDays >= 7 && noSpend >= 2)
     out.push({
       kind: "streak",
       tone: "good",
       title: `${noSpend} no-spend days`,
-      body: `Out of ${range.elapsedDays} days in this period.`,
+      body: `Out of ${range.elapsedDays} days in this period, not counting rent and subscriptions.`,
       weight: 30,
     });
 
   // Habit
-  const habit = topRemarks(current, 1)[0];
+  const habit = topRemarks(daily, 1)[0];
   if (habit && habit.count >= 3)
     out.push({
       kind: "habit",

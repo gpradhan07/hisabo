@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDownRight, ArrowUpRight, CalendarDays, Clock, MapPin, PieChart } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, CalendarDays, CreditCard, MapPin, PieChart } from "lucide-react";
 import { useMemo } from "react";
 import { CategoryAvatar } from "@/components/category-avatar";
 import { ColumnChart } from "@/components/charts/column-chart";
@@ -10,7 +10,9 @@ import { useDashboard } from "@/components/data-provider";
 import { PageHeader } from "@/components/page-header";
 import { SERIES_COLORS, slotColor, usePeriodData } from "@/components/use-period-data";
 import { Badge, Card, EmptyState, SectionHeading, Skeleton, cx } from "@/components/kit";
-import { MAX_SERIES, byCategory, compareCategories, dailyTotals, hourlyTotals, monthlyStacks, topRemarks, weekdayAverages } from "@/lib/analytics";
+import { MAX_SERIES, byPaymentMethod, compareCategories, dailyTotals, inRange, monthlyStacks, sum, topRemarks, weekdayAverages } from "@/lib/analytics";
+import { addDays, addMonths, startOfDay, startOfMonth } from "@/lib/dates";
+import { PATTERN_DAYS } from "@/lib/insights";
 
 export function AnalyticsView() {
   const { data } = useDashboard();
@@ -34,7 +36,7 @@ export function AnalyticsView() {
           <Categories className="lg:col-span-7" />
           <TopPlaces className="lg:col-span-5" />
           <Weekdays className="lg:col-span-6" />
-          <TimeOfDay className="lg:col-span-6" />
+          <HowYouPaid className="lg:col-span-6" />
 
           <div className="lg:col-span-12">
             <SectionHeading hint="Fixed window, not affected by the period">Long-term trends</SectionHeading>
@@ -47,6 +49,9 @@ export function AnalyticsView() {
   );
 }
 
+/** Below this, a change is shown in rupees: ₹120 → ₹950 is "+₹830", not "↑692%". */
+const SMALL_BASE = 500;
+
 function Categories({ className }: { className?: string }) {
   const { fmt, range } = useDashboard();
   const pd = usePeriodData()!;
@@ -58,7 +63,7 @@ function Categories({ className }: { className?: string }) {
       {!rows.length ? (
         <EmptyState icon={<PieChart size={20} />} title="No spending in this period" />
       ) : (
-        <ul className="space-y-3.5">
+        <ul className="space-y-4">
           {rows.map((c) => (
             <li key={c.category} className="flex items-center gap-3">
               <CategoryAvatar category={c.category} slots={pd.slots} />
@@ -76,6 +81,11 @@ function Categories({ className }: { className?: string }) {
                     <span className="w-16 shrink-0 text-right">
                       {c.change === null ? (
                         <Badge tone="brand">New</Badge>
+                      ) : c.prevTotal < SMALL_BASE ? (
+                        <Badge tone={c.total > c.prevTotal ? "bad" : c.total < c.prevTotal ? "good" : "neutral"}>
+                          {c.total >= c.prevTotal ? "+" : "−"}
+                          {fmt.moneyCompact(Math.abs(c.total - c.prevTotal))}
+                        </Badge>
                       ) : (
                         <Badge tone={c.change > 0.005 ? "bad" : c.change < -0.005 ? "good" : "neutral"}>
                           {c.change > 0.005 ? <ArrowUpRight size={11} /> : c.change < -0.005 ? <ArrowDownRight size={11} /> : null}
@@ -97,15 +107,15 @@ function Categories({ className }: { className?: string }) {
 function TopPlaces({ className }: { className?: string }) {
   const { fmt } = useDashboard();
   const pd = usePeriodData()!;
-  const places = useMemo(() => topRemarks(pd.items, 7), [pd]);
+  const places = useMemo(() => topRemarks(pd.daily, 7), [pd]);
   const max = places[0]?.total ?? 0;
 
   return (
-    <Card className={className} title="Top places" subtitle="Where your money goes most, by remark">
+    <Card className={className} title="Where you spend most" subtitle="Shops and places from your notes · rent and subscriptions left out">
       {!places.length ? (
-        <EmptyState icon={<MapPin size={20} />} title="No remarks yet" body="Add a remark in the Shortcut to see places here." />
+        <EmptyState icon={<MapPin size={20} />} title="No places yet" body="Add where you spent (or a note) in the Shortcut to see them here." />
       ) : (
-        <ol className="space-y-3">
+        <ol className="space-y-4">
           {places.map((p, i) => (
             <li key={p.name} className="flex items-center gap-3">
               <span
@@ -141,16 +151,23 @@ function TopPlaces({ className }: { className?: string }) {
 function Weekdays({ className }: { className?: string }) {
   const { fmt, range, now } = useDashboard();
   const pd = usePeriodData()!;
-  const rows = useMemo(() => weekdayAverages(pd.items, range.start, range.dataEnd), [pd, range]);
+  const rows = useMemo(() => weekdayAverages(pd.daily, range.start, range.dataEnd), [pd, range]);
   const top = rows.reduce((m, r) => (r.avg > m.avg ? r : m), rows[0]);
+  const enough = range.elapsedDays >= PATTERN_DAYS;
 
   return (
     <Card
       className={cx("flex flex-col", className)}
       title="By day of week"
-      subtitle={top.avg ? `${FULL_DAY[top.day]}s are your biggest spending days` : "Average spend per weekday"}
+      subtitle={
+        !top.avg
+          ? "Average day-to-day spend per weekday"
+          : enough
+            ? `${FULL_DAY[top.day]}s are your biggest spending days`
+            : "Average day-to-day spend per weekday · a pattern shows after 3 weeks"
+      }
     >
-      {pd.total === 0 ? (
+      {pd.dailyTotal === 0 ? (
         <EmptyState icon={<CalendarDays size={20} />} title="No spending in this period" />
       ) : (
         <ColumnChart
@@ -162,7 +179,7 @@ function Weekdays({ className }: { className?: string }) {
             value: r.avg,
             tick: r.day,
             label: `Average ${r.day}`,
-            detail: `${fmt.money(r.total)} over ${r.days} ${r.day}s`,
+            detail: `${fmt.money(r.total)} over ${r.days} ${r.day}s, not counting rent and subscriptions`,
           }))}
           fmt={fmt}
         />
@@ -181,38 +198,36 @@ const FULL_DAY: Record<string, string> = {
   Sun: "Sunday",
 };
 
-const hourLabel = (h: number) => {
-  const f = (x: number) => `${x % 12 || 12}${x < 12 || x === 24 ? "am" : "pm"}`;
-  return `${f(h)}–${f(h + 1)}`;
-};
-
-function TimeOfDay({ className }: { className?: string }) {
-  const { fmt, now } = useDashboard();
+/** Spending by payment method, cards one by one: what's on which card this period. */
+function HowYouPaid({ className }: { className?: string }) {
+  const { fmt } = useDashboard();
   const pd = usePeriodData()!;
-  const rows = useMemo(() => hourlyTotals(pd.items), [pd]);
-  const peak = rows.reduce((m, r) => (r.total > m.total ? r : m), rows[0]);
+  const rows = useMemo(() => byPaymentMethod(pd.items), [pd]);
+  const max = Math.max(0, ...rows.map((r) => r.total));
 
   return (
-    <Card
-      className={cx("flex flex-col", className)}
-      title="By time of day"
-      subtitle={peak.total ? `Most spending is logged around ${hourLabel(peak.hour).split("–")[0]}` : "When expenses are logged"}
-    >
+    <Card className={cx("flex flex-col", className)} title="How you paid" subtitle="UPI, cards and cash this period, as your Shortcut recorded them">
       {pd.total === 0 ? (
-        <EmptyState icon={<Clock size={20} />} title="No spending in this period" />
+        <EmptyState icon={<CreditCard size={20} />} title="No spending in this period" />
       ) : (
-        <ColumnChart
-          ariaLabel="Spending by hour of day"
-          height={240}
-          highlight={now.getHours()}
-          data={rows.map((r) => ({
-            value: r.total,
-            tick: r.hour % 6 === 0 ? (r.hour === 0 ? "12am" : r.hour === 12 ? "12pm" : r.hour < 12 ? `${r.hour}am` : `${r.hour - 12}pm`) : "",
-            label: hourLabel(r.hour),
-            detail: `${r.count} ${r.count === 1 ? "expense" : "expenses"}`,
-          }))}
-          fmt={fmt}
-        />
+        <ul className="space-y-4">
+          {rows.map((r) => (
+            <li key={r.label}>
+              <div className="flex items-baseline justify-between gap-3">
+                <span className={cx("truncate text-[14px] font-medium", r.recorded ? "text-ink" : "text-ink-2")}>{r.label}</span>
+                <span className="shrink-0 text-[14px] font-semibold tabular-nums text-ink">{fmt.money(r.total)}</span>
+              </div>
+              <div className="mt-1.5 flex items-center gap-3">
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-2">
+                  <div className={cx("h-full rounded-full", r.recorded ? "bg-brand" : "bg-axis")} style={{ width: `${Math.max(2, (r.total / max) * 100)}%` }} />
+                </div>
+                <span className="shrink-0 text-right text-[12px] tabular-nums text-ink-2">
+                  {fmt.percent(r.share)} · {r.count}×
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
     </Card>
   );
@@ -233,8 +248,11 @@ function MonthlyByCategory({ className }: { className?: string }) {
     .map((name, slot) => ({ name, slot }))
     .filter(({ name, slot }) => (slot < MAX_SERIES ? name !== "" : months.some((m) => m.parts[slot] > 0)));
   const total = months.reduce((s, m) => s + m.total, 0);
-  const prev = months.at(-2)?.total ?? 0;
-  const cur = months.at(-1)?.total ?? 0;
+  const monthStart = startOfMonth(now);
+  const lastStart = addMonths(monthStart, -1);
+  const lastSameDays = addDays(lastStart, now.getDate()) < monthStart ? addDays(lastStart, now.getDate()) : monthStart;
+  const cur = sum(inRange(data!.expenses, monthStart, addDays(startOfDay(now), 1)));
+  const prev = sum(inRange(data!.expenses, lastStart, lastSameDays));
 
   return (
     <Card
@@ -245,13 +263,13 @@ function MonthlyByCategory({ className }: { className?: string }) {
         prev > 0 ? (
           <Badge tone={cur > prev ? "bad" : "good"}>
             {cur > prev ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
-            {Math.round(Math.abs((cur - prev) / prev) * 100)}% vs last month
+            {Math.round(Math.abs((cur - prev) / prev) * 100)}% vs same days last month
           </Badge>
         ) : null
       }
     >
       <StackedColumns months={months} names={names} colors={SERIES_COLORS} fmt={fmt} highlight={months.length - 1} />
-      <details className="mt-4 border-t border-line pt-3">
+      <details className="mt-5 border-t border-line pt-4">
         <summary className="w-fit cursor-pointer text-[13px] font-medium text-brand-ink">Show as table</summary>
         <div className="mt-2 overflow-x-auto">
           <table className="w-full min-w-120 text-[12px] tabular-nums">
@@ -289,10 +307,9 @@ function MonthlyByCategory({ className }: { className?: string }) {
 function Calendar({ className }: { className?: string }) {
   const { data, fmt, now } = useDashboard();
   const totals = useMemo(() => dailyTotals(data!.expenses), [data]);
-  const yearCats = useMemo(() => byCategory(data!.expenses).length, [data]);
 
   return (
-    <Card className={className} title="Spending calendar" subtitle={`Every day of the last year at a glance · ${yearCats} categories tracked`}>
+    <Card className={className} title="Spending calendar" subtitle="Every day of the last year · darker days cost more">
       <CalendarHeatmap totals={totals} today={now} fmt={fmt} />
     </Card>
   );

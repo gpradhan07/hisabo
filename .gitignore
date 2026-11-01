@@ -66,6 +66,8 @@ CLAUDE.local.md
 
 # exported iOS Shortcuts (a v1 Shortcut has the Apps Script URL built in)
 *.shortcut
+# …except the hosted one the site serves: it has only hisabo-app's address, each person's key is pasted in
+!public/hisabo.shortcut
 
 # private planning notes
 project_arch.md

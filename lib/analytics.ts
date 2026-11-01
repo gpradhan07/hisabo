@@ -193,16 +193,6 @@ export function weekdayAverages(list: Expense[], start: Date, end: Date) {
   return totals.map((total, i) => ({ day: WEEKDAYS[i], total, avg: days[i] ? total / days[i] : 0, days: days[i] }));
 }
 
-export function hourlyTotals(list: Expense[]) {
-  const out = Array.from({ length: 24 }, (_, hour) => ({ hour, total: 0, count: 0 }));
-  for (const e of list) {
-    const b = out[e.date.getHours()];
-    b.total += e.amount;
-    b.count += 1;
-  }
-  return out;
-}
-
 /** Most frequent places/remarks by money spent. */
 /** Where the money goes most: by merchant when one was entered ("Swiggy"), else by note. */
 export function topRemarks(list: Expense[], n = 6) {
@@ -217,6 +207,31 @@ export function topRemarks(list: Expense[], n = 6) {
     map.set(key, r);
   }
   return [...map.values()].sort((a, b) => b.total - a.total).slice(0, n);
+}
+
+export const NOT_RECORDED = "Not recorded";
+
+/** How an expense was paid, one label per card: "UPI (Credit Card) · Kotak CC", "Cash", "Not recorded". */
+export function paymentLabel(e: Expense) {
+  const method = e.paymentMethod?.trim() || "";
+  const card = e.cardName?.trim() || "";
+  return !method ? NOT_RECORDED : card ? `${method} · ${card}` : method;
+}
+
+/** Spending by how it was paid; card payments are split per card. Unrecorded last. */
+export function byPaymentMethod(list: Expense[]) {
+  const map = new Map<string, { label: string; total: number; count: number }>();
+  for (const e of list) {
+    const label = paymentLabel(e);
+    const r = map.get(label.toLowerCase()) ?? { label, total: 0, count: 0 };
+    r.total += e.amount;
+    r.count += 1;
+    map.set(label.toLowerCase(), r);
+  }
+  const grand = sum(list) || 1;
+  return [...map.values()]
+    .map((r) => ({ ...r, share: r.total / grand, recorded: r.label !== NOT_RECORDED }))
+    .sort((a, b) => Number(b.recorded) - Number(a.recorded) || b.total - a.total);
 }
 
 export interface CategoryChange extends CategoryTotal {

@@ -8,11 +8,18 @@ import { demoDataset } from "@/lib/demo";
 import { makeFormatters, type Formatters } from "@/lib/format";
 import { useTicker } from "@/lib/hooks";
 import { PERIODS, getRange, type PeriodId, type Range } from "@/lib/periods";
-import { addEmi as addEmiAction, addExpense as addExpenseAction, addInvestment as addInvestmentAction, saveProfile as saveProfileAction } from "@/app/(dashboard)/actions";
+import {
+  addEmi as addEmiAction,
+  addExpense as addExpenseAction,
+  addInvestment as addInvestmentAction,
+  saveProfile as saveProfileAction,
+  updateExpense as updateExpenseAction,
+} from "@/app/(dashboard)/actions";
 import { validateEmi, type EmiErrors, type EmiInput } from "@/lib/emi-input";
 import { validateInvestment, type InvestmentErrors, type InvestmentInput } from "@/lib/investment-input";
 import { validateExpense, type ExpenseErrors, type ExpenseInput } from "@/lib/expense-input";
 import { normalizeProfile, validateProfile, type ProfileErrors, type ProfileInput } from "@/lib/profile";
+import { CACHE_KEY, PROMPTED_KEY } from "@/lib/local-data";
 import type { ClientConfig, DataPayload, Dataset, Expense, Profile, RealtimeConfig } from "@/lib/types";
 import type Pusher from "pusher-js";
 
@@ -35,6 +42,10 @@ interface DataContextValue {
   /** expenses that arrived since the page was opened (highlighted for a few seconds) */
   freshIds: ReadonlySet<string>;
   user: string | null;
+  /** hosted mode: the Google account whose Drive holds the spreadsheet */
+  sheetOwner: string | null;
+  /** hosted mode: the user's spreadsheet in Google Sheets */
+  sheetUrl: string | null;
   /** your name and optional details, from the sheet's Profile tab */
   profile: Profile | null;
   saveProfile: (input: ProfileInput) => Promise<{ ok: true } | { ok: false; error: string; fieldErrors?: ProfileErrors }>;
@@ -46,6 +57,10 @@ interface DataContextValue {
   addExpense: (input: ExpenseInput) => Promise<{ ok: true } | { ok: false; error: string; fieldErrors?: ExpenseErrors }>;
   addOpen: boolean;
   setAddOpen: (open: boolean) => void;
+  /** the expense open in the form for editing (the same dialog as "Add expense") */
+  editing: Expense | null;
+  setEditing: (expense: Expense | null) => void;
+  updateExpense: (original: Expense, input: ExpenseInput) => Promise<{ ok: true } | { ok: false; error: string; fieldErrors?: ExpenseErrors }>;
   addInvestment: (input: InvestmentInput) => Promise<{ ok: true } | { ok: false; error: string; fieldErrors?: InvestmentErrors }>;
   investOpen: boolean;
   setInvestOpen: (open: boolean) => void;
@@ -73,10 +88,8 @@ export function useDashboard() {
   return ctx;
 }
 
-const DEFAULT_CONFIG: ClientConfig = { currency: "INR", monthlyBudget: null, realtime: null };
-const CACHE_KEY = "hisabo:cache";
+const DEFAULT_CONFIG: ClientConfig = { currency: "INR", hosted: false, monthlyBudget: null, realtime: null };
 const DEMO_PROFILE_KEY = "hisabo:demo-profile";
-const PROMPTED_KEY = "hisabo:profile-prompted";
 
 const store = {
   get(key: string) {
@@ -115,14 +128,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<ClientConfig>(DEFAULT_CONFIG);
   const [status, setStatus] = useState<Status>("loading");
   const [socket, setSocket] = useState<Exclude<LiveState, "off">>("connecting");
+  const [signal, setSignal] = useState<Exclude<LiveState, "off">>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [freshIds, setFreshIds] = useState<ReadonlySet<string>>(new Set());
   const [user, setUser] = useState<string | null>(null);
+  const [sheetOwner, setSheetOwner] = useState<string | null>(null);
+  const [sheetUrl, setSheetUrl] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [editing, setEditing] = useState<Expense | null>(null);
   const [investOpen, setInvestOpen] = useState(false);
   const [emiOpen, setEmiOpen] = useState(false);
   const [period, setPeriodState] = useState<PeriodId>("this-month");
@@ -194,12 +211,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
           router.replace("/login");
           return;
         }
+        // Hosted mode: Google Drive access is gone (or setup isn't finished).
+        if (res.status === 409) {
+          router.replace("/connect-drive");
+          return;
+        }
         const json = (await res.json()) as DataPayload;
         if (!json.ok) throw new Error(json.error);
 
         setConfig(json.config);
         setDemo(json.demo);
         setUser(json.user);
+        setSheetOwner(json.sheetOwner ?? null);
+        setSheetUrl(json.sheetUrl ?? null);
         if (!json.unchanged) {
           version.current = json.version;
           let nextProfile: Profile | null;
@@ -229,19 +253,43 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [accept, router, promptIfNoName],
   );
 
+  /** A write failed because Google Drive access is gone: send the user to reconnect it. */
+  const reconnectIfNeeded = useCallback(
+    <T extends { code?: string }>(res: T): T => {
+      if (res.code === "connect-drive") router.replace("/connect-drive");
+      return res;
+    },
+    [router],
+  );
+
   const addExpense = useCallback<DataContextValue["addExpense"]>(
     async (input) => {
       const checked = validateExpense(input);
       if (!checked.ok) return { ok: false, error: "Please fix the highlighted fields.", fieldErrors: checked.errors };
       const res = await addExpenseAction(input);
-      if (!res.ok) return res;
+      if (!res.ok) return reconnectIfNeeded(res);
       const e = checked.expense;
       addedHere.current.set(manualSig(e.amount, e.category, e.remark), Date.now());
       // Pusher will also ping, but reload now in case live updates aren't set up.
       void load();
       return { ok: true };
     },
-    [load],
+    [load, reconnectIfNeeded],
+  );
+
+  const updateExpense = useCallback<DataContextValue["updateExpense"]>(
+    async (original, input) => {
+      const checked = validateExpense(input);
+      if (!checked.ok) return { ok: false, error: "Please fix the highlighted fields.", fieldErrors: checked.errors };
+      const res = await updateExpenseAction({ id: original.id, date: original.date.toISOString(), amount: original.amount }, input);
+      if (!res.ok) return reconnectIfNeeded(res);
+      // The edited row comes back looking new; it has its own toast, so skip the "new expense" one.
+      const e = checked.expense;
+      addedHere.current.set(manualSig(e.amount, e.category, e.remark), Date.now());
+      void load();
+      return { ok: true };
+    },
+    [load, reconnectIfNeeded],
   );
 
   const addInvestment = useCallback<DataContextValue["addInvestment"]>(
@@ -249,11 +297,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const checked = validateInvestment(input);
       if (!checked.ok) return { ok: false, error: "Please fix the highlighted fields.", fieldErrors: checked.errors };
       const res = await addInvestmentAction(input);
-      if (!res.ok) return res;
+      if (!res.ok) return reconnectIfNeeded(res);
       void load();
       return { ok: true };
     },
-    [load],
+    [load, reconnectIfNeeded],
   );
 
   const addEmi = useCallback<DataContextValue["addEmi"]>(
@@ -261,11 +309,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const checked = validateEmi(input);
       if (!checked.ok) return { ok: false, error: "Please fix the highlighted fields.", fieldErrors: checked.errors };
       const res = await addEmiAction(input);
-      if (!res.ok) return res;
+      if (!res.ok) return reconnectIfNeeded(res);
       void load();
       return { ok: true };
     },
-    [load],
+    [load, reconnectIfNeeded],
   );
 
   const saveProfile = useCallback<DataContextValue["saveProfile"]>(
@@ -279,11 +327,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
         return { ok: true };
       }
       const res = await saveProfileAction(input);
-      if (!res.ok) return res;
+      if (!res.ok) return reconnectIfNeeded(res);
       setProfile(res.profile);
       return { ok: true };
     },
-    [demo],
+    [demo, reconnectIfNeeded],
   );
 
   // First paint: restore preferences + the last copy of the sheet, then fetch fresh data.
@@ -309,6 +357,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         version.current = json.version;
         setConfig(json.config);
         setUser(json.user ?? null);
+        setSheetOwner(json.sheetOwner ?? null);
+        setSheetUrl(json.sheetUrl ?? null);
         setProfile(json.profile ?? null);
         accept(toDataset({ ok: true, ...sheetRows(json) }), false);
       }
@@ -357,7 +407,61 @@ export function DataProvider({ children }: { children: ReactNode }) {
     };
   }, [realtimeJson, load]);
 
-  // Phones pause background tabs, so check once when the dashboard comes back into view.
+  // Hosted mode: no timer. After every change the server bumps this user's signal in Firestore (lib/server/live.ts);
+  // listening to it, the dashboard reloads only when something was saved. The first snapshot also catches anything
+  // saved while the page loaded. Firebase is loaded only here, and keeps its sign-in in memory (never on disk).
+  const liveJson = config.live && !demo ? JSON.stringify(config.live) : null;
+  useEffect(() => {
+    if (!liveJson) return;
+    const { apiKey, projectId } = JSON.parse(liveJson) as NonNullable<ClientConfig["live"]>;
+    let cancelled = false;
+    let stop: (() => void) | undefined;
+    let burst: ReturnType<typeof setTimeout> | undefined;
+
+    void (async () => {
+      try {
+        const res = await fetch("/api/live-token", { method: "POST", cache: "no-store" });
+        if (!res.ok) throw new Error(`live token ${res.status}`);
+        const { uid, token } = (await res.json()) as { uid: string; token: string };
+        const [{ getApps, initializeApp }, { getAuth, inMemoryPersistence, setPersistence, signInWithCustomToken }, { doc, getFirestore, onSnapshot }] =
+          await Promise.all([import("firebase/app"), import("firebase/auth"), import("firebase/firestore")]);
+        if (cancelled) return;
+        const app = getApps().find((a) => a.name === "hisabo-live") ?? initializeApp({ apiKey, projectId }, "hisabo-live");
+        const auth = getAuth(app);
+        await setPersistence(auth, inMemoryPersistence);
+        await signInWithCustomToken(auth, token);
+        if (cancelled) return;
+        // undefined until the first answer from the server; then the signal's time (null before anything was saved)
+        let seen: number | null | undefined;
+        stop = onSnapshot(
+          doc(getFirestore(app), "signals", uid),
+          { includeMetadataChanges: true },
+          (snap) => {
+            // From the local cache (offline, or reconnecting): wait for the server's answer
+            if (snap.metadata.fromCache) return setSignal("connecting");
+            setSignal("connected");
+            const at = (snap.data()?.at as number | undefined) ?? null;
+            if (seen !== undefined && at === seen) return;
+            const first = seen === undefined;
+            seen = at;
+            clearTimeout(burst);
+            burst = setTimeout(() => void load(), first ? 0 : 250); // several quick saves → one reload
+          },
+          () => setSignal("unavailable"),
+        );
+      } catch {
+        if (!cancelled) setSignal("unavailable");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(burst);
+      stop?.();
+    };
+  }, [liveJson, load]);
+
+  // Phones pause background tabs (and their live connection), so check once when the dashboard comes back into view.
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible") void load();
@@ -399,13 +503,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
     config,
     fmt,
     status,
-    live: config.realtime ? socket : "off",
+    // Hosted: polling; a failed read shows as "Offline" through `status`.
+    live: config.realtime ? socket : config.live ? signal : "off",
     error,
     checkedAt,
     refreshing,
     refresh,
     freshIds,
     user,
+    sheetOwner,
+    sheetUrl,
     profile,
     saveProfile,
     profileOpen,
@@ -414,6 +521,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     addExpense,
     addOpen,
     setAddOpen,
+    editing,
+    setEditing,
+    updateExpense,
     addInvestment,
     investOpen,
     setInvestOpen,

@@ -193,14 +193,14 @@ export function StatTile({
         <p className="truncate text-[12px] font-medium text-muted-foreground sm:text-[13px]">{label}</p>
         {badge && <div className="shrink-0">{badge}</div>}
       </div>
-      <p className="mt-1 truncate text-[20px] font-semibold tracking-tight @[220px]/stat:text-[28px]">
+      <p className="mt-1.5 truncate text-[20px] font-semibold tracking-tight @[220px]/stat:text-[28px]">
         {typeof value === "string" ? <Amount text={value} /> : value}
       </p>
       {(sub || chart || footer) && (
         <div className="mt-auto flex items-end justify-between gap-3 pt-3">
           <div className="min-w-0 text-[12px]">
             {footer && <div className="line-clamp-1 font-medium text-foreground">{footer}</div>}
-            {sub && <div className="truncate text-muted-foreground">{sub}</div>}
+            {sub && <div className="mt-0.5 truncate text-muted-foreground">{sub}</div>}
           </div>
           {chart && <div className="hidden shrink-0 @[240px]/stat:block">{chart}</div>}
         </div>

@@ -8,6 +8,8 @@ export function toDataset(json: ApiResponse): Dataset {
     const amount = toNumber(r.amount);
     if (!date || !Number.isFinite(amount) || amount === 0) continue;
     const merchant = (r.merchant ?? "").trim();
+    const paymentMethod = (r.paymentMethod ?? "").trim();
+    const cardName = (r.cardName ?? "").trim();
     expenses.push({
       id: `e${r.row}`,
       date,
@@ -15,6 +17,8 @@ export function toDataset(json: ApiResponse): Dataset {
       category: tidyCategory(r.category),
       remark: r.remark ?? "",
       ...(merchant ? { merchant } : {}),
+      ...(paymentMethod ? { paymentMethod } : {}),
+      ...(cardName ? { cardName } : {}),
     });
   }
 
@@ -96,6 +100,7 @@ export function toDataset(json: ApiResponse): Dataset {
       name: (r.investmentName ?? "").trim(),
       platform: (r.platform ?? "").trim(),
       cardName: (r.cardName ?? "").trim(),
+      stoppedOn: parseDate(r.stoppedOn ?? null),
     });
   }
   investments.sort((a, b) => b.date.getTime() - a.date.getTime());
